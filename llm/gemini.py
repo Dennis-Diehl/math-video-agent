@@ -5,9 +5,10 @@ passing the appropriate model name at construction time — see config.py
 for `gemini_model_flash` / `gemini_model_flash_lite`.
 """
 
-from llm.base import BaseLLM, T
 from google import genai
 from google.genai import types
+
+from llm.base import BaseLLM, T
 
 
 class GeminiLLM(BaseLLM):
@@ -27,26 +28,28 @@ class GeminiLLM(BaseLLM):
     def generate(self, prompt: str, system_prompt: str | None = None) -> str:
         config = types.GenerateContentConfig(system_instruction=system_prompt)
         response = self.client.models.generate_content(
-            model=self.model_name, 
-            contents=prompt, 
-            config=config)
-        
+            model=self.model_name, contents=prompt, config=config
+        )
+
+        if response.text is None:
+            raise ValueError("Gemini returned no text")
         return response.text
 
     def generate_structured(
         self, prompt: str, schema: type[T], system_prompt: str | None = None
-        ) -> T:
+    ) -> T:
 
         config = types.GenerateContentConfig(
-        response_mime_type="application/json",
-        response_schema=schema,
-        system_instruction=system_prompt,
+            response_mime_type="application/json",
+            response_schema=schema,
+            system_instruction=system_prompt,
         )
         response = self.client.models.generate_content(
             model=self.model_name,
             contents=prompt,
             config=config,
         )
-        
-        return response.parsed
 
+        if not isinstance(response.parsed, schema):
+            raise TypeError(f"Gemini did not return a valid {schema.__name__}")
+        return response.parsed

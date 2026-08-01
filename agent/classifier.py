@@ -17,7 +17,7 @@ def classifier_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """
     prompt = f"Classify this math problem: '{state['user_input']}'"
     classification: Classification = llm.generate_structured(prompt, schema=Classification)
-    state['topic'] = classification.topic
-    state['difficulty'] = classification.difficulty
+    state["topic"] = classification.topic
+    state["difficulty"] = classification.difficulty
 
     return state

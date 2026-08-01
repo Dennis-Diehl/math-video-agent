@@ -19,5 +19,4 @@ class Settings(BaseSettings):
     gemini_model_flash_lite: str = "gemini-3.5-flash-lite"
 
 
-
 settings = Settings()
