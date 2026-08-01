@@ -1,0 +1,25 @@
+# Pipeline orchestration
+langgraph
+
+# LLM
+google-genai
+
+# Math
+sympy
+
+# Structured outputs / config
+pydantic
+pydantic-settings
+
+# Animation
+manim
+
+# TTS
+kokoro
+soundfile
+
+# Frontend
+streamlit
+
+# PDF input
+pymupdf

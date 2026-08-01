@@ -216,3 +216,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Plan
+ProjectPlan.md
+
+# ignore experimental files
+experiments/
+llm/.DS_Store
+.DS_Store
