@@ -1,14 +1,14 @@
 """Gemini implementation of `BaseLLM`.
 
 Uses `google-genai`. Which model is used is decided by the caller by
-passing the appropriate model name at construction time — see config.py
+passing the appropriate model name at construction time — see config/config.py
 for `gemini_model_flash` / `gemini_model_flash_lite`.
 """
 
 from google import genai
 from google.genai import types
 
-from llm.base import BaseLLM, T
+from config.llm.base import BaseLLM, T
 
 
 class GeminiLLM(BaseLLM):

@@ -219,6 +219,7 @@ __marimo__/
 
 # Plan
 ProjectPlan.md
+docs/
 
 # ignore experimental files
 experiments/

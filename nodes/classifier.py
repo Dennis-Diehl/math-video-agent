@@ -1,8 +1,8 @@
 """classifier_node — detect a math problem's topic and difficulty."""
 
-from llm.base import BaseLLM
-from schemas import Classification
-from state.pipeline_state import PipelineState
+from config.llm.base import BaseLLM
+from config.schemas import Classification
+from graph.pipeline_state import PipelineState
 
 
 def classifier_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
