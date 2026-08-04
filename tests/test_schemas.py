@@ -74,12 +74,14 @@ def test_scene_accepts_valid_values():
         narration="We factor the expression.",
         visual_type="equation",
         animation_steps=["Show the equation", "Highlight the factors"],
+        step_indices=[1, 2],
     )
     assert scene.number == 1
     assert scene.title == "Factoring"
     assert scene.narration == "We factor the expression."
     assert scene.visual_type == "equation"
     assert scene.animation_steps == ["Show the equation", "Highlight the factors"]
+    assert scene.step_indices == [1, 2]
 
 
 def test_scene_rejects_invalid_visual_type():
@@ -90,6 +92,7 @@ def test_scene_rejects_invalid_visual_type():
             narration="We factor the expression.",
             visual_type="not_a_real_visual_type",
             animation_steps=["Show the equation"],
+            step_indices=[1],
         )
 
 
@@ -100,6 +103,7 @@ def test_scene_rejects_missing_number():
             narration="We factor the expression.",
             visual_type="equation",
             animation_steps=["Show the equation"],
+            step_indices=[1],
         )
 
 
@@ -112,6 +116,7 @@ def test_scene_plan_accepts_valid_scenes():
                 narration="We factor the expression.",
                 visual_type="equation",
                 animation_steps=["Show the equation"],
+                step_indices=[1],
             ),
         ]
     )

@@ -14,6 +14,9 @@ clearer, better-paced scenes.
 the underlying steps' explanations into one flowing narration).
 - `animation_steps` are short descriptions of what visually happens in the scene, e.g. \
 "Show the equation x**2 - 4 = 0", "Transform it into (x-2)*(x+2) = 0", "Highlight both factors".
+- `step_indices` lists which of the numbered input steps (1-based) this scene covers, e.g. \
+`[2, 3]` if this scene covers steps 2 and 3. Every input step must be covered by exactly one \
+scene, in order, with no gaps or repeats.
 - `visual_type` is one of "graph", "equation", "geometry", "diagram", "table", "text". Use:
   - `"graph"` for anything plotted on a coordinate system/axis (function plots, probability \
 distributions).
@@ -28,7 +31,7 @@ diagrams, flowcharts).
 
 ### Output Format
 A list of scenes, each with a sequential `number` (starting at 1), a `title`, `narration`, \
-`visual_type`, and `animation_steps`."""
+`visual_type`, `animation_steps`, and `step_indices`."""
 
 
 def scene_planner_node(state: PipelineState, llm: BaseLLM) -> PipelineState:

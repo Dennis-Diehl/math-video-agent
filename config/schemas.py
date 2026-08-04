@@ -45,9 +45,16 @@ class Scene(BaseModel):
     narration: str
     visual_type: Literal["graph", "equation", "geometry", "diagram", "table", "text"]
     animation_steps: list[str]
+    step_indices: list[int]  # 1-based indices into the solution's steps covered by this scene
 
 
 class ScenePlan(BaseModel):
     """A plan for a math video, with a list of scenes."""
 
     scenes: list[Scene]
+
+
+class AnimationCode(BaseModel):
+    """The Manim animation calls making up one scene's `construct()` body."""
+
+    code: str
