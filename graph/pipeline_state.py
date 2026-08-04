@@ -18,3 +18,4 @@ class PipelineState(TypedDict):
     solution: list[Step]
     solvable: bool
     scenes: list[Scene]
+    manim_codes: list[str]
