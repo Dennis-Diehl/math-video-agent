@@ -225,3 +225,6 @@ docs/
 experiments/
 llm/.DS_Store
 .DS_Store
+
+# Manim render output and cache
+media/
