@@ -10,12 +10,13 @@ from pydantic import BaseModel
 
 
 class Classification(BaseModel):
-    """Topic and difficulty of a math problem."""
+    """Topic, difficulty and cleaned-up wording of a math problem."""
 
     topic: Literal[
         "algebra", "geometry", "trigonometry", "calculus", "linear_algebra", "probability"
     ]
     difficulty: Literal["school", "university"]
+    problem_statement: str
 
 
 class Extraction(BaseModel):
@@ -56,5 +57,11 @@ class ScenePlan(BaseModel):
 
 class AnimationCode(BaseModel):
     """The Manim animation calls making up one scene's `construct()` body."""
+
+    code: str
+
+
+class SceneCode(BaseModel):
+    """A complete Manim scene module."""
 
     code: str

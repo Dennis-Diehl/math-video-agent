@@ -5,19 +5,26 @@ from config.schemas import Classification, Extraction, Scene, ScenePlan, Solutio
 
 
 def test_classification_accepts_valid_values():
-    classification = Classification(topic="algebra", difficulty="school")
+    classification = Classification(
+        topic="algebra",
+        difficulty="school",
+        problem_statement="Solve the equation x**2 - 4 = 0.",
+    )
     assert classification.topic == "algebra"
     assert classification.difficulty == "school"
+    assert classification.problem_statement == "Solve the equation x**2 - 4 = 0."
 
 
 def test_classification_rejects_invalid_topic():
     with pytest.raises(ValidationError):
-        Classification(topic="not_a_real_topic", difficulty="school")
+        Classification(topic="not_a_real_topic", difficulty="school", problem_statement="Solve it.")
 
 
 def test_classification_rejects_invalid_difficulty():
     with pytest.raises(ValidationError):
-        Classification(topic="algebra", difficulty="not_a_real_difficulty")
+        Classification(
+            topic="algebra", difficulty="not_a_real_difficulty", problem_statement="Solve it."
+        )
 
 
 def test_extraction_accepts_valid_values():

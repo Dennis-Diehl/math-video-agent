@@ -24,7 +24,8 @@ class FakeLLM(BaseLLM):
 
 def make_state(scenes: list[Scene]) -> PipelineState:
     return {
-        "user_input": "Solve the equation x**2 - 4 = 0",
+        "user_input": "solve x^2-4=0 pls",
+        "problem_statement": "Solve the equation x**2 - 4 = 0.",
         "topic": "algebra",
         "difficulty": "school",
         "solution": [
@@ -34,6 +35,8 @@ def make_state(scenes: list[Scene]) -> PipelineState:
         "solvable": True,
         "scenes": scenes,
         "manim_codes": [],
+        "scene_videos": [],
+        "error": None,
     }
 
 

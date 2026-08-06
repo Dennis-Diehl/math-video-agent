@@ -21,37 +21,35 @@ MAX_ANIMATION_ATTEMPTS = 3
 
 ANIMATION_PLACEHOLDER = "___ANIMATION_BODY___"
 
-ANIMATION_SYSTEM_PROMPT = """You are a Manim animator writing the animation calls for one scene \
-of a math explanation video.
+ANIMATION_SYSTEM_PROMPT = """You write the animation calls for one scene of a Manim math video.
 
 ### Rules
-- The scene class, its `construct()` method, the subtitle and every Manim object already exist. \
-Write only the animation calls that belong inside `construct()`.
-- The objects exist but are not on screen yet. Every object you animate must first be brought in \
-with `Write`, `Create` or `FadeIn`.
-- Only use the objects listed as available, spelled exactly as listed. Never create, rename or \
-redefine an object, never index into one (no `formula_1[0]`), and never reference a name that is \
-not in the list.
-- Use only `self.play(...)` and `self.wait(...)` statements, one statement per line, with no \
-leading indentation.
-- Use only these animations: `Write`, `Create`, `Transform`, `Indicate`, `Circumscribe`, \
-`FadeIn`, `FadeOut`.
-- Use `Write` for text and formulas, `Create` for axes, graphs and tables.
-- `Transform(a, b)` morphs `a` into `b` and leaves `b` off screen, so never bring `b` in \
-separately, and keep referring to `a` afterwards.
-- Highlight an object that is already on screen with `Indicate(obj)` or `Circumscribe(obj)`, \
-never by changing its color.
-- Work through the requested animation steps in order, using one or more statements per step, \
-and follow each step with `self.wait(1)`.
-- Do not import anything, do not define functions, classes or variables, do not write comments, \
-and do not wrap the output in markdown code fences.
+- The scene class, the subtitle and every object already exist. Write only `self.play(...)` and \
+`self.wait(...)` statements, one per line, no indentation, no imports, no comments, no markdown \
+fences.
+- Use only the listed objects, spelled exactly as listed: never create, rename, redefine or \
+index into one (no `formula_1[0]`).
+- Objects are not on screen yet. Bring each one in with `Write` (text, formulas) or `Create` \
+(axes, graphs, tables) before animating it.
+- Allowed animations: `Write`, `Create`, `TransformMatchingTex`, `Transform`, `Indicate`, \
+`Circumscribe`, `Flash`, `FadeIn`, `FadeOut`.
+- `TransformMatchingTex(a, b)` and `Transform(a, b)` morph `a` into `b` and leave `b` off \
+screen: never bring `b` in separately, keep referring to `a` afterwards.
+- Make every change visible instead of cutting between pictures:
+  - Between two formulas always `TransformMatchingTex`, which animates only what changed.
+  - Bring multi-part scenes in one piece at a time (axes, then formula, then curve).
+  - After each change, point out what changed or what the narration refers to with `Indicate`, \
+`Circumscribe` or `Flash` — never by changing colour — then `self.wait(1)`.
+- Follow the requested steps in order, several statements per step. Prefer a richer animation \
+over a minimal one.
 
 ### Output Format
-Plain Python statements, one per line, without indentation. For a scene with the objects \
-`formula_1, formula_2` and the steps "Show the equation" and "Rewrite it in factored form":
+Plain statements, one per line. For objects `formula_1, formula_2` and the steps "Show the \
+equation", "Add four to both sides":
 self.play(Write(formula_1))
 self.wait(1)
-self.play(Transform(formula_1, formula_2))
+self.play(TransformMatchingTex(formula_1, formula_2))
+self.play(Indicate(formula_1))
 self.wait(1)"""
 
 SUBTITLE_LINE_LENGTH = 60
@@ -83,8 +81,14 @@ def _scene_expressions(state: PipelineState, scene: Scene) -> list[str]:
 
 
 def _to_latex(expression: str) -> str:
-    """Render a sympy expression string as LaTeX."""
-    return sp.latex(sp.sympify(expression))
+    """Render a sympy expression string as LaTeX.
+
+    Parsing is unevaluated so that steps showing an operation applied to both
+    sides survive: `Eq(x**2 - 4 + 4, 0 + 4)` has to stay on screen as written
+    instead of collapsing to `Eq(x**2, 4)`, which is what makes the
+    manipulation visible to the viewer.
+    """
+    return sp.latex(sp.sympify(expression, evaluate=False))
 
 
 def _quote(value: str) -> str:
@@ -133,7 +137,7 @@ def _setup_formulas(latex_formulas: list[str]) -> tuple[str, list[str]]:
     names = []
     for position, latex in enumerate(latex_formulas, start=1):
         name = f"formula_{position}"
-        lines.append(f"{name} = MathTex({_quote(latex)}).to_edge(UP)")
+        lines.append(f"{name} = MathTex({_quote(latex)}).move_to(ORIGIN)")
         names.append(name)
     return _indent("\n".join(lines)), names
 
@@ -155,14 +159,14 @@ def _setup_table(latex_formulas: list[str]) -> tuple[str, list[str]]:
     rows = json.dumps([[latex] for latex in latex_formulas])
     lines = [
         f"table = MathTable({rows}, include_outer_lines=True)",
-        "table.scale(0.6).to_edge(UP)",
+        "table.scale(0.6).move_to(ORIGIN)",
     ]
     return _indent("\n".join(lines)), ["table"]
 
 
 def _setup_title(scene: Scene) -> tuple[str, list[str]]:
     """Create a plain title for scenes without any mathematical notation."""
-    return _indent(f"title = Text({_quote(scene.title)}, font_size=40).to_edge(UP)"), ["title"]
+    return _indent(f"title = Text({_quote(scene.title)}, font_size=40).move_to(ORIGIN)"), ["title"]
 
 
 def _build_setup(scene: Scene, expressions: list[str]) -> tuple[str, list[str], str]:

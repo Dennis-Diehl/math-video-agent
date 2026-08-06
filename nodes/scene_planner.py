@@ -6,31 +6,33 @@ SCENE_PLANNER_SYSTEM_PROMPT = """You are a video director grouping a step-by-ste
 into video scenes.
 
 ### Rules
-- Group the given steps into scenes — you do not have to use a 1:1 mapping; combine steps that \
-belong together into one scene, or split a dense step into multiple scenes, whatever makes for \
-clearer, better-paced scenes.
-- `title` is a short descriptive title for the scene.
-- `narration` is the spoken narration and subtitle text for the scene (may combine or rephrase \
-the underlying steps' explanations into one flowing narration).
-- `animation_steps` are short descriptions of what visually happens in the scene, e.g. \
-"Show the equation x**2 - 4 = 0", "Transform it into (x-2)*(x+2) = 0", "Highlight both factors".
-- `step_indices` lists which of the numbered input steps (1-based) this scene covers, e.g. \
-`[2, 3]` if this scene covers steps 2 and 3. Every input step must be covered by exactly one \
-scene, in order, with no gaps or repeats.
-- `visual_type` is one of "graph", "equation", "geometry", "diagram", "table", "text". Use:
-  - `"graph"` for anything plotted on a coordinate system/axis (function plots, probability \
-distributions).
-  - `"equation"` for any scene showing mathematical notation (formulas, matrices, symbolic \
-steps) without a plot or shape.
-  - `"geometry"` for concrete geometric objects with measurements/construction (triangles, \
-circles, angles).
-  - `"diagram"` for abstract, non-metric structures without axes (probability trees, Venn \
-diagrams, flowcharts).
-  - `"table"` for tabular data (value tables, truth tables) shown to help solve the problem.
-  - `"text"` only for scenes with no mathematical notation, plot, or shape at all.
+- `step_indices`: the 1-based input steps a scene covers, e.g. `[2, 3]`. Every step must be \
+covered by exactly one scene, in order, no gaps or repeats.
+- The steps come in pairs: an operation being carried out, then its tidied-up result. Keep such \
+a pair in one scene — split across scenes, the manipulation becomes a cut and the viewer never \
+sees it happen. Otherwise keep scenes small: two to three steps, never more than four.
+- The first scene introduces the problem: `narration` welcomes the viewer and says what will be \
+worked out, with the first step as its `step_indices`.
+- `title`: a short descriptive title.
+- `narration`: the spoken and subtitle text, combining or rephrasing the steps' explanations. It \
+is read aloud, so spell mathematics out — "x squared minus four equals zero", never `x^2 - 4 = \
+0` or any `^`, `**`, `*`, `sqrt` notation.
+- `animation_steps`: what visually happens, detailed enough to follow the reasoning from the \
+picture alone. Say what changes and what to emphasise — "Add 4 on both sides and highlight the \
+new terms", not "Show the next equation". Applies to every `visual_type`: which curve is drawn \
+and what is pointed out, which table row matters. For example:
+  `["Show the equation x**2 - 4 = 0", "Add 4 to both sides, showing x**2 - 4 + 4 = 0 + 4",
+    "Cancel -4 and +4 on the left, leaving x**2 = 4", "Highlight the isolated x**2"]`
+- `visual_type`:
+  - `"graph"` — plotted on axes (function plots, distributions).
+  - `"equation"` — mathematical notation without a plot or shape (formulas, matrices).
+  - `"geometry"` — concrete figures with measurements (triangles, circles, angles).
+  - `"diagram"` — abstract structures without axes (probability trees, Venn diagrams).
+  - `"table"` — tabular data (value tables, truth tables).
+  - `"text"` — only when there is no notation, plot or shape at all.
 
 ### Output Format
-A list of scenes, each with a sequential `number` (starting at 1), a `title`, `narration`, \
+A list of scenes, each with a sequential `number` (from 1), `title`, `narration`, \
 `visual_type`, `animation_steps`, and `step_indices`."""
 
 
@@ -51,7 +53,10 @@ def scene_planner_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     )
 
     scene_plan: ScenePlan = llm.generate_structured(
-        prompt=f"Group the following solution steps into a video scene plan:\n\n{steps_text}",
+        prompt=(
+            f"Problem the video explains: '{state['problem_statement']}'\n\n"
+            f"Group the following solution steps into a video scene plan:\n\n{steps_text}"
+        ),
         schema=ScenePlan,
         system_prompt=SCENE_PLANNER_SYSTEM_PROMPT,
     )

@@ -13,9 +13,12 @@ class PipelineState(TypedDict):
     """Shared state passed between pipeline nodes."""
 
     user_input: str
+    problem_statement: str
     topic: str
     difficulty: str
     solution: list[Step]
     solvable: bool
     scenes: list[Scene]
     manim_codes: list[str]
+    scene_videos: list[str]
+    error: str | None

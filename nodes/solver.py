@@ -33,33 +33,35 @@ EXPLANATION_SYSTEM_PROMPT = """You are a math tutor creating a step-by-step vide
 of how to solve a math problem.
 
 ### Rules
-- Break the solution into discrete steps building toward the final answer.
-- Each step has an `explanation` (spoken narration and subtitle text shown in the video) and an \
-`expression` (the mathematical expression at that point in the solution).
-- Write `explanation` in short, natural sentences suitable for being read aloud — not dense \
-textbook prose.
-- Write `expression` as a plain sympy expression string, parsed later with `sp.sympify()` — do \
-not prefix sympy names with `sp.` here (e.g. write `Derivative(x**2, x)`, not \
-`sp.Derivative(x**2, x)`; `sp.sympify()` already recognizes sympy names directly and does not \
-know `sp`).
-- Use `**` for exponentiation, never `^` (e.g. `x**2`, not `x^2` — `^` means XOR in Python).
-- Use `Eq(lhs, rhs)` for equations, never Python's `==` (e.g. `Eq(x**2, 4)`, not `x**2 == 4`).
-- Use `Rational(a, b)` for exact fractions, never plain `/` between integers \
-(e.g. `Rational(1, 2)`, not `1/2`, which becomes a float `0.5`).
-- `expression` must match what `explanation` describes — do not explain one operation while \
-showing a different expression.
+- Break the solution into many small steps. The viewer has to be able to follow every \
+manipulation.
+- Never jump straight to the result of a manipulation. Give it two steps: first the \
+un-simplified form showing the operation being carried out, then the simplified result. Seeing \
+the operation itself is what makes the video understandable, whatever the problem:
+  - Equation — `Eq(x**2 - 4, 0)`, `Eq(x**2 - 4 + 4, 0 + 4)`, `Eq(x**2, 4)`.
+  - Derivative — `Derivative(x**3 + 2*x, x)`, `Derivative(x**3, x) + Derivative(2*x, x)`, \
+`3*x**2 + 2`.
+  - Integral — `Integral(2*x + 1, x)`, `Integral(2*x, x) + Integral(1, x)`, `x**2 + x`.
+  - Matrices, fractions, factorisation, substitution: the same — in-between form first, tidied \
+form second.
+- Write the un-simplified step exactly as it should appear on screen, leaving parts like \
+`- 4 + 4`, `0 + 4` or an unevaluated `Derivative(...)` in place. Do not pre-simplify them.
+- `explanation`: short, natural sentences for reading aloud, not textbook prose. It must match \
+what its `expression` shows.
+- `expression`: a plain sympy string parsed with `sp.sympify()`, so no `sp.` prefix — write \
+`Derivative(x**2, x)`, not `sp.Derivative(x**2, x)`. Use `**` not `^`, `Eq(lhs, rhs)` not `==`, \
+`Rational(1, 2)` not `1/2` (which becomes a float).
 - The final step's `expression` must match the given final result exactly.
 
 ### Output Format
-A list of steps, each with an `explanation` (spoken narration/subtitle text) and an `expression` \
-(the mathematical expression at that point in the solution)."""
+A list of steps, each with an `explanation` and an `expression`."""
 
 
 def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """Solve a math problem.
 
     Args:
-        state: Current pipeline state (reads `user_input`).
+        state: Current pipeline state (reads `problem_statement`).
         llm: LLM client to use for solving.
 
     Returns:
@@ -68,7 +70,7 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
 
     # Step1: Generate sympy code for the computation needed to solve the problem
     extraction: Extraction = llm.generate_structured(
-        prompt=f"Write a sympy code snippet from this problem: '{state['user_input']}'",
+        prompt=f"Write a sympy code snippet from this problem: '{state['problem_statement']}'",
         schema=Extraction,
         system_prompt=EXTRACTION_SYSTEM_PROMPT,
     )
@@ -86,7 +88,7 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     # Step3: Convert the result into a step-by-step solution explanation
     if solvable:
         prompt = (
-            f"Given the problem '{state['user_input']}' and the final result '{result}', "
+            f"Given the problem '{state['problem_statement']}' and the final result '{result}', "
             "write a step-by-step solution leading to this result."
         )
         solution = Solution(steps=[])
@@ -98,12 +100,14 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
             )
             try:
                 for step in candidate.steps:
-                    sp.sympify(step.expression)
+                    # Parsed the same way codegen_node will parse it, so a step
+                    # that renders differently there cannot slip through here.
+                    sp.sympify(step.expression, evaluate=False)
                 solution = candidate
                 break
             except Exception as e:  # noqa: BLE001 — sp.sympify() can raise any exception type on invalid syntax
                 prompt = (
-                    f"Given the problem '{state['user_input']}' and the final result '{result}', "
+                    f"Given the problem '{state['problem_statement']}' and the final result '{result}', "
                     "write a step-by-step solution leading to this result.\n"
                     f"Your previous attempt included an expression sympy could not parse: {e}\n"
                     "Fix the syntax and write the full step-by-step solution again."
