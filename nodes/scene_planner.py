@@ -6,17 +6,24 @@ SCENE_PLANNER_SYSTEM_PROMPT = """You are a video director grouping a step-by-ste
 into video scenes.
 
 ### Rules
-- `step_indices`: the 1-based input steps a scene covers, e.g. `[2, 3]`. Every step must be \
-covered by exactly one scene, in order, no gaps or repeats.
-- The steps come in pairs: an operation being carried out, then its tidied-up result. Keep such \
-a pair in one scene — split across scenes, the manipulation becomes a cut and the viewer never \
-sees it happen. Otherwise keep scenes small: two to three steps, never more than four.
+- `step_indices`: the 1-based input steps a scene shows, e.g. `[2, 3]`. Go through the steps in \
+order and leave no gaps: every step must appear in some scene.
+- Scenes overlap by one step. A scene opens on the step the previous scene ended on and then \
+carries out its own change, so `[1, 2]` is followed by `[2, 3]`, then `[3, 4]`. That repeated \
+step is the picture the viewer is already looking at when the scene starts.
+- Because of that overlap, every scene shows at least two steps, never one — a one-step scene \
+has nothing to animate, so its change turns into a cut between scenes that the viewer never sees \
+happen. Two steps is the norm, three at most, beyond that the narration becomes a wall of text.
+- The last scene is the one that arrives at the final step, and the video ends there. Never add \
+a closing scene holding only that step: it writes the result a second time right after the \
+viewer watched it appear.
 - The first scene introduces the problem: `narration` welcomes the viewer and says what will be \
-worked out, with the first step as its `step_indices`.
+worked out, starting from the first step.
 - `title`: a short descriptive title.
-- `narration`: the spoken and subtitle text, combining or rephrasing the steps' explanations. It \
-is read aloud, so spell mathematics out — "x squared minus four equals zero", never `x^2 - 4 = \
-0` or any `^`, `**`, `*`, `sqrt` notation.
+- `narration`: the spoken and subtitle text, combining or rephrasing the steps' explanations. \
+Keep it to one or two sentences — it is shown as a subtitle, so a long paragraph is unreadable. \
+It is read aloud, so spell mathematics out — "x squared minus four equals zero", never \
+`x^2 - 4 = 0` or any `^`, `**`, `*`, `sqrt` notation.
 - `animation_steps`: what visually happens, detailed enough to follow the reasoning from the \
 picture alone. Say what changes and what to emphasise — "Add 4 on both sides and highlight the \
 new terms", not "Show the next equation". Applies to every `visual_type`: which curve is drawn \

@@ -46,7 +46,9 @@ class Scene(BaseModel):
     narration: str
     visual_type: Literal["graph", "equation", "geometry", "diagram", "table", "text"]
     animation_steps: list[str]
-    step_indices: list[int]  # 1-based indices into the solution's steps covered by this scene
+    # 1-based indices into the solution's steps. Scenes overlap by one step: a scene opens on
+    # the step the previous one ended on, so it always has a starting picture to animate from.
+    step_indices: list[int]
 
 
 class ScenePlan(BaseModel):
