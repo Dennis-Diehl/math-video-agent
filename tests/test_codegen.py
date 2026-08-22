@@ -70,8 +70,9 @@ def test_codegen_renders_validated_expressions_as_latex():
 
     code = codegen_node(state, llm)["manim_codes"][0]
 
-    # The LaTeX comes from the solution steps, not from the LLM.
-    assert 'MathTex("x^{2} - 4 = 0")' in code
+    # The LaTeX comes from the solution steps, not from the LLM, and each
+    # formula is split into terms so single terms can be highlighted.
+    assert 'formula_1 = MathTex("x^{2}", "- 4", "= 0")' in code
     assert "formula_2 = MathTex(" in code
 
 
@@ -96,13 +97,18 @@ def test_codegen_embeds_generated_animation_calls():
     assert "        self.wait(1)" in code
 
 
-def test_codegen_passes_available_object_names_to_llm():
+def test_codegen_passes_available_objects_and_their_terms_to_llm():
     llm = FakeLLM(["self.play(Write(formula_1))"])
     state = make_state([make_scene()])
 
     codegen_node(state, llm)
 
-    assert "formula_1, formula_2" in llm.prompts[0]
+    prompt = llm.prompts[0]
+    assert "formula_1" in prompt
+    assert "formula_2" in prompt
+    # The addressable terms must be listed, otherwise get_part_by_tex is a guess.
+    assert '"x^{2}"' in prompt
+    assert '"- 4"' in prompt
 
 
 def test_codegen_retries_when_generated_code_has_a_syntax_error():
@@ -190,3 +196,42 @@ def test_codegen_generated_code_is_syntactically_valid():
     code = codegen_node(state, llm)["manim_codes"][0]
 
     compile(code, "<scene>", "exec")
+
+
+def test_split_latex_keeps_nested_structure_intact():
+    from nodes.codegen import _split_latex
+
+    # Top-level operators split, nested ones do not.
+    assert _split_latex("x^{2} - 4 = 0") == ["x^{2}", "- 4", "= 0"]
+    # The exponent's minus must survive, it is what shows the power rule.
+    assert _split_latex("3 x^{3 - 1} + 2") == ["3 x^{3 - 1}", "+ 2"]
+    # Matrices and \left...\right groups stay whole.
+    matrix = r"\left[\begin{matrix}2 & 1\\1 & 2\end{matrix}\right]"
+    assert _split_latex(matrix) == [matrix]
+    assert _split_latex(r"\frac{d}{d x} \left(x^{3} + 2 x\right)") == [
+        r"\frac{d}{d x} \left(x^{3} + 2 x\right)"
+    ]
+
+
+def test_split_latex_is_lossless():
+    from nodes.codegen import _split_latex
+
+    for latex in [
+        "x^{2} - 4 + 4 = 0 + 4",
+        r"\left(x - 2\right) \left(x + 2\right) = 0",
+        r"\frac{1}{2} x + 3",
+        r"\int \left(2 x + 1\right)\, dx",
+    ]:
+        assert "".join(_split_latex(latex)).replace(" ", "") == latex.replace(" ", "")
+
+
+def test_to_latex_keeps_the_order_the_solver_wrote():
+    from nodes.codegen import _to_latex
+
+    # sympy's default latex() sorts terms into its own canonical order, which
+    # would swap terms between consecutive steps for no visible reason.
+    assert _to_latex("Derivative(x**3, x) + Derivative(2*x, x)") == (
+        r"\frac{d}{d x} x^{3} + \frac{d}{d x} 2 x"
+    )
+    assert _to_latex("(x - 2)*(x + 2)") == r"\left(x - 2\right) \left(x + 2\right)"
+    assert _to_latex("2*x**(1 + 1)/(1 + 1) + x").startswith(r"\frac{2 x^{1 + 1}}{1 + 1}")

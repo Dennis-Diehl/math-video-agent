@@ -27,29 +27,37 @@ ANIMATION_SYSTEM_PROMPT = """You write the animation calls for one scene of a Ma
 - The scene class, the subtitle and every object already exist. Write only `self.play(...)` and \
 `self.wait(...)` statements, one per line, no indentation, no imports, no comments, no markdown \
 fences.
-- Use only the listed objects, spelled exactly as listed: never create, rename, redefine or \
-index into one (no `formula_1[0]`).
+- Use only the listed objects, spelled exactly as listed: never create, rename or redefine one, \
+and never address a part by position (no `formula_1[0]`).
+- A formula is built from its individual terms, so `formula_1.get_part_by_tex("+ 4")` returns \
+just that term. Use it to highlight the term that changed — the exact text of every term is \
+listed with the object. Passing text that is not in that list makes the render fail.
 - Objects are not on screen yet. Bring each one in with `Write` (text, formulas) or `Create` \
 (axes, graphs, tables) before animating it.
-- Allowed animations: `Write`, `Create`, `TransformMatchingTex`, `Transform`, `Indicate`, \
-`Circumscribe`, `Flash`, `FadeIn`, `FadeOut`.
-- `TransformMatchingTex(a, b)` and `Transform(a, b)` morph `a` into `b` and leave `b` off \
-screen: never bring `b` in separately, keep referring to `a` afterwards.
+- Allowed animations: `Write`, `Create`, `TransformMatchingTex`, `Indicate`, `Circumscribe`, \
+`Flash`, `FadeIn`, `FadeOut`.
+- `TransformMatchingTex(a, b)` replaces `a` with `b` on screen. Never bring `b` in separately \
+first, and from then on refer to `b`, never to `a` again — a chain of three formulas is \
+`TransformMatchingTex(formula_1, formula_2)` followed by \
+`TransformMatchingTex(formula_2, formula_3)`. Referring back to an already replaced formula \
+puts it back on screen on top of the current one.
+- Every listed formula must appear on screen, and every consecutive pair must be joined by a \
+`TransformMatchingTex`: with `formula_1, formula_2, formula_3` that is one `Write` and two \
+transforms. Leaving a formula out drops the change that leads to it, and the viewer sees a cut \
+where the working should be. This holds for the opening scene too — welcoming the viewer does \
+not replace showing the first transformation.
 - Make every change visible instead of cutting between pictures:
-  - Between two formulas always `TransformMatchingTex`, which animates only what changed.
   - Bring multi-part scenes in one piece at a time (axes, then formula, then curve).
+  - A scene holding a single object (a table, a graph, a title) has nothing to transform: bring \
+it in, then highlight what the narration refers to.
   - After each change, point out what changed or what the narration refers to with `Indicate`, \
 `Circumscribe` or `Flash` — never by changing colour — then `self.wait(1)`.
 - Follow the requested steps in order, several statements per step. Prefer a richer animation \
 over a minimal one.
 
 ### Output Format
-Plain statements, one per line. For objects `formula_1, formula_2` and the steps "Show the \
-equation", "Add four to both sides":
+Plain statements, one per line:
 self.play(Write(formula_1))
-self.wait(1)
-self.play(TransformMatchingTex(formula_1, formula_2))
-self.play(Indicate(formula_1))
 self.wait(1)"""
 
 SUBTITLE_LINE_LENGTH = 60
@@ -81,14 +89,19 @@ def _scene_expressions(state: PipelineState, scene: Scene) -> list[str]:
 
 
 def _to_latex(expression: str) -> str:
-    """Render a sympy expression string as LaTeX.
+    """Render a sympy expression string as LaTeX, exactly as it was written.
 
-    Parsing is unevaluated so that steps showing an operation applied to both
-    sides survive: `Eq(x**2 - 4 + 4, 0 + 4)` has to stay on screen as written
+    Parsing is unevaluated so that a step showing an operation being carried
+    out survives: `Eq(x**2 - 4 + 4, 0 + 4)` has to stay on screen as written
     instead of collapsing to `Eq(x**2, 4)`, which is what makes the
     manipulation visible to the viewer.
+
+    `order="none"` keeps the terms where the solver put them. sympy otherwise
+    sorts them into its own canonical order, which would silently swap terms
+    between one step and the next — the viewer would see `d/dx x**3 + d/dx 2*x`
+    turn into `d/dx 2*x + d/dx x**3` for no reason they could follow.
     """
-    return sp.latex(sp.sympify(expression, evaluate=False))
+    return sp.latex(sp.sympify(expression, evaluate=False), order="none")
 
 
 def _quote(value: str) -> str:
@@ -115,6 +128,60 @@ def _indent(code: str) -> str:
     return "\n".join(f"        {line}" if line.strip() else "" for line in code.splitlines())
 
 
+def _split_latex(latex: str) -> list[str]:
+    """Split a LaTeX expression at its top-level `+`, `-` and `=` signs.
+
+    Building a `MathTex` from the pieces rather than one string makes each
+    term addressable by content via `get_part_by_tex`, so an animation can
+    highlight the term that just changed instead of the whole formula.
+
+    Each operator stays attached to the term it introduces, and anything
+    nested — braces, `\\left...\\right` pairs, `\\frac`, an exponent like
+    `x^{3 - 1}` — is left intact.
+    """
+    parts: list[str] = []
+    current = ""
+    depth = 0
+    index = 0
+
+    while index < len(latex):
+        char = latex[index]
+
+        if char == "\\":
+            # Copy a control sequence whole, so \left, \right and \frac are
+            # never cut in the middle.
+            end = index + 1
+            while end < len(latex) and (latex[end].isalpha() or end == index + 1):
+                end += 1
+            token = latex[index:end]
+            if token == r"\left":
+                depth += 1
+            elif token == r"\right":
+                depth -= 1
+            current += token
+            index = end
+            continue
+
+        if char in "{[(":
+            depth += 1
+        elif char in "}])":
+            depth -= 1
+
+        if depth == 0 and char in "+-=" and current.strip():
+            parts.append(current.strip())
+            current = char
+            index += 1
+            continue
+
+        current += char
+        index += 1
+
+    if current.strip():
+        parts.append(current.strip())
+
+    return parts or [latex]
+
+
 def _plottable(expressions: list[str]) -> tuple[sp.Expr, sp.Symbol] | None:
     """Find the first expression that can be plotted as y = f(x).
 
@@ -131,18 +198,24 @@ def _plottable(expressions: list[str]) -> tuple[sp.Expr, sp.Symbol] | None:
     return None
 
 
-def _setup_formulas(latex_formulas: list[str]) -> tuple[str, list[str]]:
-    """Create one `MathTex` per formula, stacked at the top of the frame."""
+def _setup_formulas(latex_formulas: list[str]) -> tuple[str, dict[str, list[str]]]:
+    """Create one `MathTex` per formula, centred in the frame.
+
+    Each formula is built from its individual terms so that animations can
+    address a single term with `get_part_by_tex`.
+    """
     lines = []
-    names = []
+    objects: dict[str, list[str]] = {}
     for position, latex in enumerate(latex_formulas, start=1):
         name = f"formula_{position}"
-        lines.append(f"{name} = MathTex({_quote(latex)}).move_to(ORIGIN)")
-        names.append(name)
-    return _indent("\n".join(lines)), names
+        terms = _split_latex(latex)
+        joined = ", ".join(_quote(term) for term in terms)
+        lines.append(f"{name} = MathTex({joined}).move_to(ORIGIN)")
+        objects[name] = terms
+    return _indent("\n".join(lines)), objects
 
 
-def _setup_graph(expression: sp.Expr, variable: sp.Symbol) -> tuple[str, list[str]]:
+def _setup_graph(expression: sp.Expr, variable: sp.Symbol) -> tuple[str, dict[str, list[str]]]:
     """Create axes on the left, the formula on the right, and the curve."""
     lines = [
         "axes = Axes(x_range=[-5, 5, 1], y_range=[-5, 5, 1], x_length=6, y_length=5)",
@@ -151,26 +224,30 @@ def _setup_graph(expression: sp.Expr, variable: sp.Symbol) -> tuple[str, list[st
         f"formula_1 = MathTex({_quote(sp.latex(expression))}).scale(0.8).to_edge(RIGHT)",
         f"graph = axes.plot(lambda {variable.name}: {sp.pycode(expression)}, color=BLUE)",
     ]
-    return _indent("\n".join(lines)), ["axes", "axis_labels", "formula_1", "graph"]
+    return _indent("\n".join(lines)), {"axes": [], "axis_labels": [], "formula_1": [], "graph": []}
 
 
-def _setup_table(latex_formulas: list[str]) -> tuple[str, list[str]]:
+def _setup_table(latex_formulas: list[str]) -> tuple[str, dict[str, list[str]]]:
     """Create a table with one expression per row."""
     rows = json.dumps([[latex] for latex in latex_formulas])
     lines = [
         f"table = MathTable({rows}, include_outer_lines=True)",
         "table.scale(0.6).move_to(ORIGIN)",
     ]
-    return _indent("\n".join(lines)), ["table"]
+    return _indent("\n".join(lines)), {"table": []}
 
 
-def _setup_title(scene: Scene) -> tuple[str, list[str]]:
+def _setup_title(scene: Scene) -> tuple[str, dict[str, list[str]]]:
     """Create a plain title for scenes without any mathematical notation."""
-    return _indent(f"title = Text({_quote(scene.title)}, font_size=40).move_to(ORIGIN)"), ["title"]
+    setup = _indent(f"title = Text({_quote(scene.title)}, font_size=40).move_to(ORIGIN)")
+    return setup, {"title": []}
 
 
-def _build_setup(scene: Scene, expressions: list[str]) -> tuple[str, list[str], str]:
-    """Build a scene's object setup, its object names, and any extra imports.
+def _build_setup(scene: Scene, expressions: list[str]) -> tuple[str, dict[str, list[str]], str]:
+    """Build a scene's object setup, its objects, and any extra imports.
+
+    The objects map each name to the terms it can be addressed by, which is
+    empty for anything that is not a formula.
 
     "geometry" and "diagram" fall back to showing formulas: drawing a
     construction or a tree needs points/edges that no field on `Scene` carries.
@@ -178,44 +255,58 @@ def _build_setup(scene: Scene, expressions: list[str]) -> tuple[str, list[str], 
     latex_formulas = [_to_latex(expression) for expression in expressions]
 
     if scene.visual_type == "text" or not latex_formulas:
-        setup, names = _setup_title(scene)
-        return setup, names, ""
+        setup, objects = _setup_title(scene)
+        return setup, objects, ""
 
     if scene.visual_type == "graph":
         plottable = _plottable(expressions)
         if plottable is not None:
-            setup, names = _setup_graph(*plottable)
-            return setup, names, "import math\n"
+            setup, objects = _setup_graph(*plottable)
+            return setup, objects, "import math\n"
 
     if scene.visual_type == "table":
-        setup, names = _setup_table(latex_formulas)
-        return setup, names, ""
+        setup, objects = _setup_table(latex_formulas)
+        return setup, objects, ""
 
-    setup, names = _setup_formulas(latex_formulas)
-    return setup, names, ""
+    setup, objects = _setup_formulas(latex_formulas)
+    return setup, objects, ""
 
 
-def _default_animation(object_names: list[str]) -> str:
+def _default_animation(objects: dict[str, list[str]]) -> str:
     """Show every object in turn — used when the LLM cannot produce valid code."""
     lines = []
-    for name in object_names:
+    for name in objects:
         lines += [f"self.play(Write({name}))", "self.wait(1)"]
     return "\n".join(lines)
 
 
-def _animation_prompt(scene: Scene, object_names: list[str]) -> str:
+def _describe_objects(objects: dict[str, list[str]]) -> str:
+    """List the objects and, for formulas, the terms they can be addressed by."""
+    described = []
+    for name, terms in objects.items():
+        if terms:
+            joined = ", ".join(_quote(term) for term in terms)
+            described.append(f"- {name}, made of the terms {joined}")
+        else:
+            described.append(f"- {name}")
+    return "\n".join(described)
+
+
+def _animation_prompt(scene: Scene, objects: dict[str, list[str]]) -> str:
     steps = "\n".join(
         f"{position}. {step}" for position, step in enumerate(scene.animation_steps, 1)
     )
     return (
         f"Scene title: {scene.title}\n"
         f"Narration: {scene.narration}\n"
-        f"Available objects: {', '.join(object_names)}\n"
+        f"Available objects:\n{_describe_objects(objects)}\n"
         f"Animation steps to perform:\n{steps}"
     )
 
 
-def _generate_animation(llm: BaseLLM, scene: Scene, object_names: list[str], scaffold: str) -> str:
+def _generate_animation(
+    llm: BaseLLM, scene: Scene, objects: dict[str, list[str]], scaffold: str
+) -> str:
     """Ask the LLM for the scene's animation calls, retrying on invalid code.
 
     The generated statements are compiled together with the scene scaffold, so
@@ -223,7 +314,7 @@ def _generate_animation(llm: BaseLLM, scene: Scene, object_names: list[str], sca
     `MAX_ANIMATION_ATTEMPTS` failures the scene falls back to simply showing
     each object.
     """
-    prompt = _animation_prompt(scene, object_names)
+    prompt = _animation_prompt(scene, objects)
 
     for _ in range(MAX_ANIMATION_ATTEMPTS):
         animation: AnimationCode = llm.generate_structured(
@@ -236,20 +327,20 @@ def _generate_animation(llm: BaseLLM, scene: Scene, object_names: list[str], sca
             compile(scaffold.replace(ANIMATION_PLACEHOLDER, body), "<scene>", "exec")
         except SyntaxError as error:
             prompt = (
-                f"{_animation_prompt(scene, object_names)}\n"
+                f"{_animation_prompt(scene, objects)}\n"
                 f"Your previous attempt was not valid Python: {error}\n"
                 "Write the animation calls again, fixing the syntax."
             )
             continue
         return body
 
-    return _indent(_default_animation(object_names))
+    return _indent(_default_animation(objects))
 
 
 def _render_scene(state: PipelineState, scene: Scene, llm: BaseLLM) -> str:
     """Build one scene's Manim module: fixed scaffold plus generated animations."""
     expressions = _scene_expressions(state, scene)
-    setup, object_names, extra_imports = _build_setup(scene, expressions)
+    setup, objects, extra_imports = _build_setup(scene, expressions)
 
     scaffold = SCENE_TEMPLATE.format(
         extra_imports=extra_imports,
@@ -258,7 +349,7 @@ def _render_scene(state: PipelineState, scene: Scene, llm: BaseLLM) -> str:
         setup=setup,
         animation_body=ANIMATION_PLACEHOLDER,
     )
-    body = _generate_animation(llm, scene, object_names, scaffold)
+    body = _generate_animation(llm, scene, objects, scaffold)
 
     return scaffold.replace(ANIMATION_PLACEHOLDER, body)
 
