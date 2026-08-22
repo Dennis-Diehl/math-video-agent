@@ -8,24 +8,17 @@ render the error output is handed back to the LLM to correct the code before
 trying again.
 """
 
-import hashlib
 import shutil
 import subprocess
 from pathlib import Path
 
 from config.llm.base import BaseLLM
 from config.schemas import SceneCode
+from graph.media import MEDIA_DIR, RENDER_QUALITY, run_id, scene_dir, scene_stem
 from graph.pipeline_state import PipelineState
 
 MAX_RENDER_ATTEMPTS = 3
 RENDER_TIMEOUT_SECONDS = 300
-
-# Manim writes its scene files and rendered output below this directory. It is
-# git-ignored, so renders never end up in version control.
-MEDIA_DIR = Path("media")
-
-# How many characters of the problem hash name a run's directory.
-RUN_ID_LENGTH = 8
 
 # How much of Manim's output to keep when reporting a failure. Tracebacks are
 # long and the useful part is at the end.
@@ -49,21 +42,7 @@ The full corrected Python module, starting with its imports and containing exact
 one Scene class."""
 
 
-def _run_id(problem: str) -> str:
-    """Derive a short directory name from the problem being explained.
-
-    Rendering one problem must not overwrite another's output: without this,
-    every run writes to the same `scene_1.py`, so a second run silently
-    replaces the videos the first one produced.
-    """
-    return hashlib.sha256(problem.encode()).hexdigest()[:RUN_ID_LENGTH]
-
-
-def _scene_stem(run_id: str, scene_number: int) -> str:
-    return f"{run_id}_scene_{scene_number}"
-
-
-def _rendered_video(run_id: str, scene_number: int) -> Path | None:
+def _rendered_video(run: str, scene_number: int) -> Path | None:
     """Locate the video Manim produced for a scene.
 
     Manim writes to `<media_dir>/videos/<file stem>/<quality>/<SceneName>.mp4`.
@@ -71,21 +50,21 @@ def _rendered_video(run_id: str, scene_number: int) -> Path | None:
     wildcard — but only one level deep, to skip the partial movie files Manim
     keeps in a subfolder.
     """
-    stem = _scene_stem(run_id, scene_number)
+    stem = scene_stem(run, scene_number)
     pattern = f"videos/{stem}/*/Scene{scene_number}.mp4"
     return next(iter(sorted(MEDIA_DIR.glob(pattern))), None)
 
 
-def _render(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str]:
+def _render(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
     """Write a scene's code to disk and render it.
 
     Returns the path to the rendered video, or `None` plus the error output if
     rendering failed.
     """
-    scene_dir = MEDIA_DIR / "scenes" / run_id
-    scene_dir.mkdir(parents=True, exist_ok=True)
-    stem = _scene_stem(run_id, scene_number)
-    scene_file = scene_dir / f"{stem}.py"
+    directory = scene_dir(run)
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = scene_stem(run, scene_number)
+    scene_file = directory / f"{stem}.py"
     scene_file.write_text(code)
 
     # Drop output from an earlier attempt, so a stale video from a previous
@@ -100,7 +79,7 @@ def _render(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str
                 "manim",
                 "render",
                 "--quality",
-                "l",
+                RENDER_QUALITY,
                 "--media_dir",
                 str(MEDIA_DIR),
                 str(scene_file),
@@ -119,7 +98,7 @@ def _render(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str
     if result.returncode != 0:
         return None, (result.stderr or result.stdout)[-ERROR_TAIL_CHARS:]
 
-    video = _rendered_video(run_id, scene_number)
+    video = _rendered_video(run, scene_number)
     if video is None:
         return None, "Manim reported success but produced no video file."
 
@@ -141,13 +120,13 @@ def _correct(llm: BaseLLM, code: str, error: str) -> str:
 
 
 def _render_with_retries(
-    llm: BaseLLM, code: str, run_id: str, scene_number: int
+    llm: BaseLLM, code: str, run: str, scene_number: int
 ) -> tuple[Path | None, str]:
     """Render a scene, correcting the code between failed attempts."""
     error = ""
 
     for attempt in range(MAX_RENDER_ATTEMPTS):
-        video, error = _render(code, run_id, scene_number)
+        video, error = _render(code, run, scene_number)
         if video is not None:
             return video, ""
         if attempt < MAX_RENDER_ATTEMPTS - 1:
@@ -168,12 +147,12 @@ def executor_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
         Updated pipeline state with `scene_videos` set to the rendered videos,
         and `error` describing the scenes that could not be rendered at all.
     """
-    run_id = _run_id(state["problem_statement"])
+    run = run_id(state["problem_statement"])
     videos: list[str] = []
     failures: list[str] = []
 
     for position, code in enumerate(state["manim_codes"], start=1):
-        video, error = _render_with_retries(llm, code, run_id, position)
+        video, error = _render_with_retries(llm, code, run, position)
         if video is None:
             failures.append(f"Scene {position}: {error}")
             continue

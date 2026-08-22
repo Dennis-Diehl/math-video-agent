@@ -18,5 +18,9 @@ class Settings(BaseSettings):
     gemini_model_flash: str = "gemini-3.5-flash"
     gemini_model_flash_lite: str = "gemini-3.5-flash-lite"
 
+    # TTS
+    kokoro_voice: str = "af_heart"
+    kokoro_lang_code: str = "a"  # american english
+
 
 settings = Settings()

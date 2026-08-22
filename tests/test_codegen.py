@@ -1,7 +1,19 @@
+import math
+import re
+
+import pytest
+
 from config.llm.base import BaseLLM, T
 from config.schemas import AnimationCode, Scene, Step
+from graph.media import FRAMES_PER_SECOND
 from graph.pipeline_state import PipelineState
-from nodes.codegen import MAX_ANIMATION_ATTEMPTS, codegen_node
+from nodes.codegen import (
+    ANIMATION_SECONDS,
+    MAX_ANIMATION_ATTEMPTS,
+    MIN_PAUSE_SECONDS,
+    _fit_timing,
+    codegen_node,
+)
 
 
 class FakeLLM(BaseLLM):
@@ -34,8 +46,11 @@ def make_state(scenes: list[Scene]) -> PipelineState:
         ],
         "solvable": True,
         "scenes": scenes,
+        # One narration length per scene: codegen times each scene to its words.
+        "scene_durations": [5.0] * len(scenes),
         "manim_codes": [],
         "scene_videos": [],
+        "audio_files": [],
         "error": None,
     }
 
@@ -94,7 +109,9 @@ def test_codegen_embeds_generated_animation_calls():
     code = codegen_node(state, llm)["manim_codes"][0]
 
     assert "        self.play(Write(formula_1))" in code
-    assert "        self.wait(1)" in code
+    # The pause is rewritten to make the scene last as long as its narration:
+    # 5s of words minus 1s of animation leaves 4s to wait.
+    assert "        self.wait(4.0000)" in code
 
 
 def test_codegen_passes_available_objects_and_their_terms_to_llm():
@@ -235,3 +252,86 @@ def test_to_latex_keeps_the_order_the_solver_wrote():
     )
     assert _to_latex("(x - 2)*(x + 2)") == r"\left(x - 2\right) \left(x + 2\right)"
     assert _to_latex("2*x**(1 + 1)/(1 + 1) + x").startswith(r"\frac{2 x^{1 + 1}}{1 + 1}")
+
+
+def scene_seconds(code: str) -> float:
+    """How long a generated scene runs: one second per animation plus its pauses."""
+    animations = len(re.findall(r"self\.play\(", code))
+    pauses = [float(value) for value in re.findall(r"self\.wait\(([\d.]+)\)", code)]
+    return animations * ANIMATION_SECONDS + sum(pauses)
+
+
+BODY = """self.play(Write(formula_1))
+self.wait(1)
+self.play(TransformMatchingTex(formula_1, formula_2))
+self.wait(1)
+self.play(Indicate(formula_2))
+self.wait(1)"""
+
+
+def test_fit_timing_matches_a_narration_longer_than_the_animations():
+    fitted = _fit_timing(BODY, narration_seconds=9.0)
+
+    assert scene_seconds(fitted) == pytest.approx(9.0, abs=0.05)
+
+
+def test_fit_timing_stretches_the_pauses_not_the_animations():
+    fitted = _fit_timing(BODY, narration_seconds=9.0)
+
+    # Three animations stay at a second each; the extra six seconds go to the pauses.
+    assert len(re.findall(r"self\.play\(", fitted)) == 3
+    assert [float(v) for v in re.findall(r"self\.wait\(([\d.]+)\)", fitted)] == [2.0, 2.0, 2.0]
+
+
+def test_fit_timing_never_rushes_animations_for_a_short_narration():
+    # Squeezing three animations into 2.92s would hurry the very moment the
+    # viewer needs to follow, so the scene stays longer than the words.
+    fitted = _fit_timing(BODY, narration_seconds=2.92)
+
+    assert len(re.findall(r"self\.play\(", fitted)) == 3
+    assert scene_seconds(fitted) > 2.92
+
+
+def test_fit_timing_keeps_every_pause_readable():
+    fitted = _fit_timing(BODY, narration_seconds=0.1)
+
+    pauses = [float(value) for value in re.findall(r"self\.wait\(([\d.]+)\)", fitted)]
+    assert all(pause >= MIN_PAUSE_SECONDS for pause in pauses)
+
+
+def test_fit_timing_leaves_a_body_without_pauses_alone():
+    body = "self.play(Write(formula_1))"
+
+    assert _fit_timing(body, narration_seconds=9.0) == body
+
+
+def test_fit_timing_keeps_indentation():
+    fitted = _fit_timing("        self.play(Write(f))\n        self.wait(1)", narration_seconds=5.0)
+
+    assert fitted.splitlines()[1].startswith("        self.wait(")
+
+
+def played_seconds(code: str) -> float:
+    """How long Manim really runs a scene, counting whole frames only."""
+    animations = len(re.findall(r"self\.play\(", code))
+    pauses = [float(value) for value in re.findall(r"self\.wait\(([\d.]+)\)", code)]
+    truncated = sum(math.floor(p * FRAMES_PER_SECOND) / FRAMES_PER_SECOND for p in pauses)
+    return animations * ANIMATION_SECONDS + truncated
+
+
+def test_fit_timing_pauses_survive_manims_frame_truncation():
+    # Manim drops a partial frame, so a pause written as 0.53 becomes seven
+    # frames instead of eight and the scene ends before the narration does.
+    for narration in [2.92, 4.05, 5.30, 5.34, 6.7, 9.0]:
+        fitted = _fit_timing(BODY, narration_seconds=narration)
+        assert played_seconds(fitted) >= narration, f"scene ends early for {narration}s of speech"
+
+
+def test_fit_timing_rounds_pauses_up_to_whole_frames():
+    fitted = _fit_timing(BODY, narration_seconds=6.7)
+
+    for value in re.findall(r"self\.wait\(([\d.]+)\)", fitted):
+        frames = float(value) * FRAMES_PER_SECOND
+        assert frames >= math.floor(frames) >= 1
+        # Written high enough that truncating lands on the intended frame.
+        assert math.floor(frames) == round(frames, 3) // 1

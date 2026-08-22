@@ -9,15 +9,27 @@ that were already validated in `solver_node`. Only the animation calls inside
 """
 
 import json
+import math
+import re
 import textwrap
 
 import sympy as sp
 
 from config.llm.base import BaseLLM
 from config.schemas import AnimationCode, Scene
+from graph.media import whole_frames
 from graph.pipeline_state import PipelineState
 
 MAX_ANIMATION_ATTEMPTS = 3
+
+# Manim plays an animation over one second unless told otherwise.
+ANIMATION_SECONDS = 1.0
+
+# The shortest pause that still lets a viewer read what changed.
+MIN_PAUSE_SECONDS = 0.4
+
+PLAY_CALL = re.compile(r"^\s*self\.play\(")
+WAIT_CALL = re.compile(r"^(\s*)self\.wait\([^)]*\)\s*$")
 
 ANIMATION_PLACEHOLDER = "___ANIMATION_BODY___"
 
@@ -337,7 +349,49 @@ def _generate_animation(
     return _indent(_default_animation(objects))
 
 
-def _render_scene(state: PipelineState, scene: Scene, llm: BaseLLM) -> str:
+def _fit_timing(body: str, narration_seconds: float) -> str:
+    """Stretch a scene's pauses so it lasts as long as its narration.
+
+    Manim runs an animation for a second and the generated code pauses for
+    another, giving a scene a fixed length regardless of what is being said.
+    The pauses absorb the difference; animations are never shortened, since
+    rushing them would hide the step the viewer has to follow. A scene whose
+    animations outlast its narration therefore ends after the words, and
+    `assembler_node` pads the audio to match.
+
+    Args:
+        body: The generated `self.play(...)` / `self.wait(...)` statements.
+        narration_seconds: How long this scene's narration takes to say.
+
+    Returns:
+        The same statements with the pause durations rewritten.
+    """
+    lines = body.splitlines()
+    animations = sum(1 for line in lines if PLAY_CALL.match(line))
+    pauses = [index for index, line in enumerate(lines) if WAIT_CALL.match(line)]
+    if not pauses:
+        return body
+
+    animation_seconds = animations * ANIMATION_SECONDS
+    shortest = animation_seconds + len(pauses) * MIN_PAUSE_SECONDS
+    target = max(narration_seconds, shortest)
+    # Rounded up: Manim truncates a partial frame, cutting the scene short.
+    pause = whole_frames((target - animation_seconds) / len(pauses))
+
+    # Rounded up at the last digit so the printed value stays on its frame
+    # boundary: writing 8/15 as "0.53" would truncate back to seven frames.
+    written = math.ceil(pause * 10_000) / 10_000
+
+    for index in pauses:
+        indent = WAIT_CALL.match(lines[index]).group(1)  # type: ignore[union-attr]
+        lines[index] = f"{indent}self.wait({written:.4f})"
+
+    return "\n".join(lines)
+
+
+def _render_scene(
+    state: PipelineState, scene: Scene, llm: BaseLLM, narration_seconds: float
+) -> str:
     """Build one scene's Manim module: fixed scaffold plus generated animations."""
     expressions = _scene_expressions(state, scene)
     setup, objects, extra_imports = _build_setup(scene, expressions)
@@ -349,7 +403,7 @@ def _render_scene(state: PipelineState, scene: Scene, llm: BaseLLM) -> str:
         setup=setup,
         animation_body=ANIMATION_PLACEHOLDER,
     )
-    body = _generate_animation(llm, scene, objects, scaffold)
+    body = _fit_timing(_generate_animation(llm, scene, objects, scaffold), narration_seconds)
 
     return scaffold.replace(ANIMATION_PLACEHOLDER, body)
 
@@ -358,13 +412,17 @@ def codegen_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """Generate Manim code for every planned scene.
 
     Args:
-        state: Current pipeline state (reads `scenes` and `solution`).
+        state: Current pipeline state (reads `scenes`, `solution` and
+            `scene_durations`, which times each scene to its narration).
         llm: LLM client used to turn each scene's `animation_steps` into
             Manim animation calls.
 
     Returns:
         Updated pipeline state with `manim_codes` set, one entry per scene.
     """
-    state["manim_codes"] = [_render_scene(state, scene, llm) for scene in state["scenes"]]
+    state["manim_codes"] = [
+        _render_scene(state, scene, llm, narration_seconds)
+        for scene, narration_seconds in zip(state["scenes"], state["scene_durations"])
+    ]
 
     return state

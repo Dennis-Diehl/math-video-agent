@@ -4,9 +4,10 @@ import pytest
 
 from config.llm.base import BaseLLM, T
 from config.schemas import SceneCode, Step
+from graph.media import run_id, scene_stem
 from graph.pipeline_state import PipelineState
 from nodes import executor
-from nodes.executor import MAX_RENDER_ATTEMPTS, _run_id, _scene_stem, executor_node
+from nodes.executor import MAX_RENDER_ATTEMPTS, executor_node
 
 
 class FakeLLM(BaseLLM):
@@ -38,23 +39,25 @@ def make_state(problem: str, codes: list[str]) -> PipelineState:
         "scenes": [],
         "manim_codes": codes,
         "scene_videos": [],
+        "audio_files": [],
+        "scene_durations": [],
         "error": None,
     }
 
 
 def test_run_id_is_stable_for_the_same_problem():
-    assert _run_id("Solve x**2 - 4 = 0") == _run_id("Solve x**2 - 4 = 0")
+    assert run_id("Solve x**2 - 4 = 0") == run_id("Solve x**2 - 4 = 0")
 
 
 def test_run_id_differs_between_problems():
     # Two problems rendered one after another must not share a directory,
     # or the second run silently overwrites the first one's videos.
-    assert _run_id("Solve x**2 - 4 = 0") != _run_id("Differentiate x**3 + 2*x")
+    assert run_id("Solve x**2 - 4 = 0") != run_id("Differentiate x**3 + 2*x")
 
 
 def test_scene_stem_keeps_runs_apart():
-    equation = _scene_stem(_run_id("Solve x**2 - 4 = 0"), 1)
-    derivative = _scene_stem(_run_id("Differentiate x**3 + 2*x"), 1)
+    equation = scene_stem(run_id("Solve x**2 - 4 = 0"), 1)
+    derivative = scene_stem(run_id("Differentiate x**3 + 2*x"), 1)
 
     assert equation != derivative
     assert equation.endswith("_scene_1")
@@ -63,9 +66,9 @@ def test_scene_stem_keeps_runs_apart():
 def test_executor_collects_one_video_per_scene(monkeypatch: pytest.MonkeyPatch):
     rendered: list[tuple[str, int]] = []
 
-    def fake_render(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str]:
-        rendered.append((run_id, scene_number))
-        return Path(f"media/videos/{run_id}_scene_{scene_number}/l/Scene{scene_number}.mp4"), ""
+    def fake_render(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
+        rendered.append((run, scene_number))
+        return Path(f"media/videos/{run}_scene_{scene_number}/l/Scene{scene_number}.mp4"), ""
 
     monkeypatch.setattr(executor, "_render", fake_render)
     state = executor_node(make_state("Solve x**2 - 4 = 0", ["# one", "# two"]), FakeLLM())
@@ -78,9 +81,9 @@ def test_executor_collects_one_video_per_scene(monkeypatch: pytest.MonkeyPatch):
 def test_executor_writes_each_run_to_its_own_directory(monkeypatch: pytest.MonkeyPatch):
     seen: list[str] = []
 
-    def fake_render(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str]:
-        seen.append(run_id)
-        return Path(f"media/videos/{run_id}_scene_{scene_number}/l/Scene{scene_number}.mp4"), ""
+    def fake_render(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
+        seen.append(run)
+        return Path(f"media/videos/{run}_scene_{scene_number}/l/Scene{scene_number}.mp4"), ""
 
     monkeypatch.setattr(executor, "_render", fake_render)
     llm = FakeLLM()
@@ -94,7 +97,7 @@ def test_executor_writes_each_run_to_its_own_directory(monkeypatch: pytest.Monke
 def test_executor_corrects_code_between_failed_attempts(monkeypatch: pytest.MonkeyPatch):
     attempts: list[str] = []
 
-    def fake_render(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str]:
+    def fake_render(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
         attempts.append(code)
         if len(attempts) < 2:
             return None, "AttributeError: no attribute 'foo'"
@@ -111,7 +114,7 @@ def test_executor_corrects_code_between_failed_attempts(monkeypatch: pytest.Monk
 
 
 def test_executor_reports_a_scene_it_could_not_render(monkeypatch: pytest.MonkeyPatch):
-    def always_fails(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str]:
+    def always_fails(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
         return None, "LaTeX error"
 
     monkeypatch.setattr(executor, "_render", always_fails)
@@ -127,7 +130,7 @@ def test_executor_reports_a_scene_it_could_not_render(monkeypatch: pytest.Monkey
 
 
 def test_executor_keeps_rendered_scenes_when_one_fails(monkeypatch: pytest.MonkeyPatch):
-    def fail_second(code: str, run_id: str, scene_number: int) -> tuple[Path | None, str]:
+    def fail_second(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
         if scene_number == 2:
             return None, "LaTeX error"
         return Path(f"media/videos/x_scene_{scene_number}/l/Scene{scene_number}.mp4"), ""

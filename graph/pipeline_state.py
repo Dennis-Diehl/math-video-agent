@@ -21,4 +21,6 @@ class PipelineState(TypedDict):
     scenes: list[Scene]
     manim_codes: list[str]
     scene_videos: list[str]
+    audio_files: list[str]
+    scene_durations: list[float]
     error: str | None
