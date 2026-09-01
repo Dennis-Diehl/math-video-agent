@@ -45,3 +45,13 @@ def scene_dir(run: str) -> Path:
 def audio_dir(run: str) -> Path:
     """Directory holding a run's narration audio."""
     return MEDIA_DIR / "audio" / run
+
+
+def assembled_dir(run: str) -> Path:
+    """Directory holding a run's scenes once picture and narration are joined."""
+    return MEDIA_DIR / "assembled" / run
+
+
+def final_video(run: str) -> Path:
+    """Path of a run's finished video."""
+    return MEDIA_DIR / "final" / f"{run}.mp4"

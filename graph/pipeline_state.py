@@ -23,4 +23,5 @@ class PipelineState(TypedDict):
     scene_videos: list[str]
     audio_files: list[str]
     scene_durations: list[float]
+    final_video: str
     error: str | None
