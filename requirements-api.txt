@@ -1,8 +1,0 @@
-# The api/worker service. Deliberately does not include requirements.txt's
-# Manim/Kokoro/LangGraph — those only run inside docker/sandbox/Dockerfile's
-# image, one throwaway container per job. This file is what the root
-# Dockerfile installs from.
-fastapi
-uvicorn[standard]
-pydantic
-pydantic-settings

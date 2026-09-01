@@ -44,16 +44,7 @@ A list of scenes, each with a sequential `number` (from 1), `title`, `narration`
 
 
 def scene_planner_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
-    """Generate a plan for a math video, given a solution to a math problem.
-
-    Args:
-        state: The current pipeline state.
-        llm: The LLM to use for generating the scene plan.
-
-    Returns:
-        Updated pipeline state with `scenes` set.
-    """
-
+    """Group a solution's steps into a plan of video scenes."""
     steps_text = "\n".join(
         f"{i + 1}. {step.explanation} ({step.expression})"
         for i, step in enumerate(state["solution"])

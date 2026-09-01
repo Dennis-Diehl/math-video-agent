@@ -1,8 +1,5 @@
-"""Application configuration via pydantic-settings.
-
-Loads settings from environment variables / a `.env` file. Code that
-needs the Gemini API key or model names imports the shared `settings`
-instance from here instead of reading `os.environ` directly.
+"""Application settings, loaded from env vars / `.env`. Import `settings`,
+never read `os.environ` directly.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict

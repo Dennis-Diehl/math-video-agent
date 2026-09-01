@@ -1,10 +1,4 @@
-"""Output paths for a pipeline run.
-
-Scene modules, rendered videos and narration audio are keyed by the problem
-being explained, so a second run cannot overwrite the first one's files. The
-key is a hash rather than a timestamp, so re-running a problem reuses its
-directory instead of creating a new one each time.
-"""
+"""Output paths for a pipeline run, keyed by a hash of the problem."""
 
 import hashlib
 import math

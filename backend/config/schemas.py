@@ -1,8 +1,4 @@
-"""Pydantic schemas shared across pipeline nodes.
-
-These are the structured-output contracts that `BaseLLM.generate_structured`
-validates LLM responses against.
-"""
+"""Structured-output contracts for `BaseLLM.generate_structured`."""
 
 from typing import Literal
 

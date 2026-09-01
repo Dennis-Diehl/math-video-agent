@@ -1,10 +1,4 @@
-"""solver_node — solve a math problem into steps a video can show.
-
-sympy does the arithmetic, so the result shown in the video is computed rather
-than recalled. When sympy cannot solve the problem, the run stops here instead
-of falling back to an unverified answer: a video that confidently shows wrong
-working is worse than no video, and `error` tells the user what to change.
-"""
+"""solver_node — solve a math problem into steps a video can show, via sympy."""
 
 import sympy as sp
 
@@ -94,25 +88,13 @@ A list of steps, each with an `explanation` and an `expression`."""
 
 
 def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
-    """Solve a math problem.
-
-    Args:
-        state: Current pipeline state (reads `problem_statement`).
-        llm: LLM client to use for solving.
-
-    Returns:
-        Updated pipeline state with `solution` and `solvable` set, and `error`
-        naming what sympy could not do when the problem stays unsolved.
-    """
-
-    # Step1: Generate sympy code for the computation needed to solve the problem
+    """Solve a math problem, setting `solution`/`solvable`/`error`."""
     extraction: Extraction = llm.generate_structured(
         prompt=f"Write a sympy code snippet from this problem: '{state['problem_statement']}'",
         schema=Extraction,
         system_prompt=EXTRACTION_SYSTEM_PROMPT,
     )
 
-    # Step2: Execute the sympy code snippet to compute the solution
     namespace: dict[str, object] = {"sp": sp}
     error: str | None = None
     try:
@@ -126,7 +108,6 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
         solvable = False
         error = f"sympy could not evaluate this problem: {e}" + REPHRASE_HINT
 
-    # Step3: Convert the result into a step-by-step solution explanation
     if solvable:
         prompt = (
             f"Given the problem '{state['problem_statement']}' and the final result '{result}', "
@@ -142,9 +123,7 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
             )
             try:
                 for step in candidate.steps:
-                    # Parsed the same way codegen_node will parse it, so a step
-                    # that renders differently there cannot slip through here.
-                    sp.sympify(step.expression, evaluate=False)
+                    sp.sympify(step.expression, evaluate=False)  # same parse codegen_node uses
                 solution = candidate
                 break
             except Exception as e:  # noqa: BLE001 — sp.sympify() can raise any exception type on invalid syntax

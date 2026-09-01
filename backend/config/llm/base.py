@@ -1,9 +1,4 @@
-"""Abstract LLM interface.
-
-Code that needs an LLM should depend on `BaseLLM`, not on a concrete
-provider. This keeps the LLM swappable (e.g. Gemini today, another
-provider later) without touching the calling code.
-"""
+"""Abstract LLM interface. Depend on `BaseLLM`, not a concrete provider."""
 
 from abc import ABC, abstractmethod
 from typing import TypeVar

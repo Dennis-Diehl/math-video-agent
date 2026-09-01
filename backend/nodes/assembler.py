@@ -1,12 +1,5 @@
-"""assembler_node — join every scene's picture and narration into one video.
-
-Two ffmpeg passes: each scene's silent video is given its narration, then the
-scenes are concatenated. Both run without re-encoding the picture, so the pass
-costs seconds rather than minutes and loses no quality.
-
-Timing is already settled by the time this runs. `codegen_node` stretched each
-scene's pauses to cover its narration, so a scene's picture is never shorter
-than its words — the only thing left to do here is pad the trailing silence.
+"""assembler_node — join every scene's picture and narration into one video,
+via two ffmpeg passes (mux, then concat), no re-encoding.
 """
 
 import subprocess
@@ -15,24 +8,13 @@ from pathlib import Path
 from graph.media import assembled_dir, final_video, run_id, scene_stem
 from graph.pipeline_state import PipelineState
 
-# Joining copies the picture through untouched, so even a long video is quick.
 ASSEMBLY_TIMEOUT_SECONDS = 120
-
-# How much of ffmpeg's output to keep when reporting a failure. It reports the
-# codecs it saw before the actual error, which comes last.
-ERROR_TAIL_CHARS = 2000
+ERROR_TAIL_CHARS = 2000  # error is at the end of ffmpeg's output
 
 
 def _run_ffmpeg(arguments: list[str], destination: Path) -> tuple[Path | None, str]:
-    """Run one ffmpeg command.
-
-    Args:
-        arguments: The command line after `ffmpeg -y`.
-        destination: The file ffmpeg is expected to write.
-
-    Returns:
-        The written file, or `None` plus the error output if ffmpeg failed.
-    """
+    """Run one ffmpeg command. Returns the written file, or `None` plus the
+    error output on failure."""
     destination.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -58,13 +40,9 @@ def _run_ffmpeg(arguments: list[str], destination: Path) -> tuple[Path | None, s
 
 
 def _mux(video: Path, audio: Path, destination: Path) -> tuple[Path | None, str]:
-    """Give one scene's silent video its narration.
-
-    `apad` extends the narration with silence and `-shortest` ends the result
-    with the picture, which fills the gap left when a scene's animations run
-    on past its words. This cannot cut the narration short: `_fit_timing` in
-    `codegen_node` sizes every scene to at least its narration and rounds up to
-    whole frames, so the picture always outlasts the audio.
+    """Give one scene's silent video its narration. `apad` + `-shortest` pads
+    the audio to the picture's length — safe since the picture is never
+    shorter than the narration.
     """
     return _run_ffmpeg(
         [
@@ -86,21 +64,9 @@ def _mux(video: Path, audio: Path, destination: Path) -> tuple[Path | None, str]
 
 
 def _concat(scenes: list[Path], destination: Path) -> tuple[Path | None, str]:
-    """Join the finished scenes into one video, in order.
-
-    Uses ffmpeg's concat demuxer, which stitches streams together without
-    re-encoding. It requires every input to share codecs and parameters — true
-    here, since all scenes come from the same Manim render profile and the same
-    audio encode in `_mux`.
-
-    `+faststart` moves the index to the front of the file. Without it ffmpeg
-    leaves the index at the end, and a player that starts decoding before it
-    has read that far never learns the file has an audio track: the video plays
-    silently in a browser or a notebook, while ffprobe reports sound because it
-    reads the whole file first.
-
-    The listing goes next to the scenes rather than next to the finished video,
-    so it stays inside the run's own directory.
+    """Join the finished scenes into one video, in order, via ffmpeg's concat
+    demuxer. `+faststart` moves the index to the front — without it, players
+    that start decoding early see no audio track and play silently.
     """
     listing = scenes[0].parent / "concat.txt"
     listing.parent.mkdir(parents=True, exist_ok=True)
@@ -125,21 +91,8 @@ def _concat(scenes: list[Path], destination: Path) -> tuple[Path | None, str]:
 
 
 def assembler_node(state: PipelineState) -> PipelineState:
-    """Join picture and narration into the finished video.
-
-    Takes no LLM: an ffmpeg failure comes from the media, not from generated
-    code, so there is nothing for a model to correct. Failures are reported
-    rather than retried.
-
-    Args:
-        state: Current pipeline state (reads `scene_videos`, `audio_files` and
-            `problem_statement`, which names the directory of this run). A
-            scene the executor could not render at all has an empty entry in
-            `scene_videos` and is left out of the video entirely.
-
-    Returns:
-        Updated pipeline state with `final_video` set to the finished file, and
-        `error` extended by whatever could not be assembled.
+    """Join picture and narration into the finished video. No LLM: ffmpeg
+    failures come from the media, not generated code, so nothing to correct.
     """
     run = run_id(state["problem_statement"])
     directory = assembled_dir(run)
@@ -167,8 +120,6 @@ def assembler_node(state: PipelineState) -> PipelineState:
         state["final_video"] = ""
         failures.append("No scene could be assembled, so there is no video.")
 
-    # Keep what earlier nodes reported: a scene the executor had to replace is
-    # still worth knowing about once the video exists.
     state["error"] = "\n".join(filter(None, [state["error"], *failures])) or None
 
     return state

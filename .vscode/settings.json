@@ -3,8 +3,9 @@
         "**/target/**": true
     },
     "python.testing.pytestArgs": [
-        "tests"
+        "backend/tests"
     ],
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "python.defaultInterpreterPath": "backend/.venv/bin/python"
 }

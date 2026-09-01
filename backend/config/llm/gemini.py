@@ -1,9 +1,4 @@
-"""Gemini implementation of `BaseLLM`.
-
-Uses `google-genai`. Which model is used is decided by the caller by
-passing the appropriate model name at construction time — see config/config.py
-for `gemini_model_flash` / `gemini_model_flash_lite`.
-"""
+"""Gemini implementation of `BaseLLM`, via `google-genai`."""
 
 from google import genai
 from google.genai import types
@@ -15,12 +10,6 @@ class GeminiLLM(BaseLLM):
     """Gemini-backed LLM client."""
 
     def __init__(self, model_name: str, api_key: str) -> None:
-        """Initialize the Gemini client for a specific model.
-
-        Args:
-            model_name: Gemini model identifier, e.g. "gemini-3.5-flash".
-            api_key: Gemini API key.
-        """
         self.model_name = model_name
         self.api_key = api_key
         self.client = genai.Client(api_key=self.api_key)

@@ -1,13 +1,6 @@
-"""The assembled LangGraph pipeline.
-
-Wires the nodes into one graph and decides which model each of them gets.
-Nodes take an `llm` or a `tts` alongside the state, which LangGraph does not
-pass, so each one is bound to its client with `functools.partial` before being
-added to the graph.
-
-The path forks in two places, both where a node has already done what recovery
-it could: `solver_node` stops the run when sympy cannot solve the problem at
-all, and a set of scenes with no usable video skips assembly.
+"""Assembles the LangGraph pipeline and decides which model each node gets.
+Nodes are bound to their `llm`/`tts` via `functools.partial`, since LangGraph
+only passes state.
 """
 
 from functools import partial
@@ -32,38 +25,17 @@ from nodes.tts import tts_node
 
 
 def _solved(state: PipelineState) -> str:
-    """Stop the run when the problem could not be solved.
-
-    `solver_node` has already exhausted its retries at this point, and its
-    `error` explains to the user what to reword. Everything downstream needs
-    `solution`, so there is nothing left to do.
-    """
+    """Stop the run when the problem could not be solved."""
     return END if state["error"] else "scene_planner"
 
 
 def _rendered(state: PipelineState) -> str:
-    """Skip assembly when not a single scene produced a video.
-
-    An empty entry in `scene_videos` means even the executor's replacement
-    scene would not render. If that happened to every scene there is nothing
-    to join.
-    """
+    """Skip assembly when not a single scene produced a video."""
     return "assembler" if any(state["scene_videos"]) else END
 
 
 def build_pipeline(llm: BaseLLM, cheap_llm: BaseLLM, tts: BaseTTS) -> CompiledStateGraph:
-    """Assemble the pipeline.
-
-    Args:
-        llm: Client for the nodes that reason about mathematics — solving,
-            planning scenes, writing and correcting Manim code.
-        cheap_llm: Client for classification, which picks from a fixed set of
-            answers and does not need the stronger model.
-        tts: Engine that speaks each scene's narration.
-
-    Returns:
-        The compiled graph, ready to `invoke` with an initial state.
-    """
+    """Assemble the pipeline. `cheap_llm` handles classification, `llm` everything else."""
     graph = StateGraph(PipelineState)
 
     graph.add_node("classifier", partial(classifier_node, llm=cheap_llm))
@@ -77,8 +49,6 @@ def build_pipeline(llm: BaseLLM, cheap_llm: BaseLLM, tts: BaseTTS) -> CompiledSt
     graph.add_edge(START, "classifier")
     graph.add_edge("classifier", "solver")
     graph.add_conditional_edges("solver", _solved, {"scene_planner": "scene_planner", END: END})
-    # Narration comes before code generation: it decides how long a scene is,
-    # which is what `codegen_node` times the animations against.
     graph.add_edge("scene_planner", "tts")
     graph.add_edge("tts", "codegen")
     graph.add_edge("codegen", "executor")
@@ -108,23 +78,10 @@ def initial_state(user_input: str) -> PipelineState:
 
 
 def run_pipeline(user_input: str) -> PipelineState:
-    """Turn a math problem into a video, using the configured Gemini and Kokoro clients.
-
-    Args:
-        user_input: The problem as the user wrote it.
-
-    Returns:
-        The final state. `final_video` holds the finished file when there is
-        one; `error` explains what went wrong or which scenes had to be
-        replaced. Both can be set at once — a video with a replaced scene is
-        still a video.
-    """
+    """Turn a math problem into a video, using the configured Gemini and Kokoro clients."""
     pipeline = build_pipeline(
         llm=GeminiLLM(settings.gemini_model_flash, settings.gemini_api_key),
         cheap_llm=GeminiLLM(settings.gemini_model_flash_lite, settings.gemini_api_key),
         tts=KokoroTTS(settings.kokoro_voice, settings.kokoro_lang_code),
     )
-
-    # `invoke` is typed as returning a plain dict; the graph was built from
-    # `PipelineState`, so the keys are the ones declared there.
     return cast(PipelineState, pipeline.invoke(initial_state(user_input)))

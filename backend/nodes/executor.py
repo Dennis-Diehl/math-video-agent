@@ -1,11 +1,5 @@
-"""executor_node — render each scene's Manim code into a video file.
-
-Rendering is where mistakes in generated code actually surface: `codegen_node`
-only compiles the code, which catches syntax errors but not Manim runtime
-errors (an animation that does not fit its object, LaTeX that fails to
-typeset). Each scene therefore gets several attempts, and after a failed
-render the error output is handed back to the LLM to correct the code before
-trying again.
+"""executor_node — render each scene's Manim code into a video file, retrying
+with LLM-corrected code on failure.
 """
 
 import shutil
@@ -44,36 +38,24 @@ one Scene class."""
 
 
 def _rendered_video(run: str, scene_number: int) -> Path | None:
-    """Locate the video Manim produced for a scene.
-
-    Manim writes to `<media_dir>/videos/<file stem>/<quality>/<SceneName>.mp4`.
-    The quality folder depends on the render flags, so it is matched with a
-    wildcard — but only one level deep, to skip the partial movie files Manim
-    keeps in a subfolder.
-    """
+    """Locate the video Manim produced for a scene."""
     stem = scene_stem(run, scene_number)
     pattern = f"videos/{stem}/*/Scene{scene_number}.mp4"
     return next(iter(sorted(MEDIA_DIR.glob(pattern))), None)
 
 
 def _render(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
-    """Write a scene's code to disk and render it.
-
-    Returns the path to the rendered video, or `None` plus the error output if
-    rendering failed.
-    """
+    """Write a scene's code to disk and render it. Returns the video path, or
+    `None` plus the error output on failure."""
     directory = scene_dir(run)
     directory.mkdir(parents=True, exist_ok=True)
     stem = scene_stem(run, scene_number)
     scene_file = directory / f"{stem}.py"
     scene_file.write_text(code)
 
-    # Drop output from an earlier attempt, so a stale video from a previous
-    # render can never be mistaken for this attempt succeeding.
     shutil.rmtree(MEDIA_DIR / "videos" / stem, ignore_errors=True)
 
-    # This runs LLM-generated code in a separate process. That is not a
-    # sandbox — see the design doc's note on sandboxing before deployment.
+    # LLM-generated code runs in a separate process, not a sandbox.
     try:
         result = subprocess.run(
             [
@@ -137,22 +119,8 @@ def _render_with_retries(
 
 
 def executor_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
-    """Render every scene, correcting code that fails to render.
-
-    A scene that still fails after every attempt is replaced by a title-only
-    scene rather than dropped, so its narration keeps a picture and the videos
-    stay aligned with `audio_files` position by position.
-
-    Args:
-        state: Current pipeline state (reads `manim_codes`, `scenes`,
-            `scene_durations`, and `problem_statement`, which names the
-            directory of this run).
-        llm: LLM client used to correct code between failed render attempts.
-
-    Returns:
-        Updated pipeline state with `scene_videos` holding one entry per scene
-        — empty for a scene whose replacement would not render either — and
-        `error` reporting the scenes that had to be replaced.
+    """Render every scene, correcting code that fails and falling back to a
+    title-only scene if it still fails, so scenes stay aligned with `audio_files`.
     """
     run = run_id(state["problem_statement"])
     videos: list[str] = []

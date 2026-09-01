@@ -1,8 +1,4 @@
-"""LangGraph pipeline state definition.
-
-`PipelineState` is threaded through every node in the pipeline. Only
-holds fields that currently-implemented nodes actually read or write.
-"""
+"""Shared state threaded through every pipeline node."""
 
 from typing import TypedDict
 

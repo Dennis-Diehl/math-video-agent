@@ -1,0 +1,5 @@
+# api service — no Manim/Kokoro/LangGraph, those only run in Dockerfile.sandbox.
+fastapi
+uvicorn[standard]
+pydantic
+pydantic-settings

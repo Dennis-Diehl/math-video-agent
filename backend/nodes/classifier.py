@@ -25,16 +25,7 @@ The problem's `topic`, its `difficulty`, and the restated `problem_statement`.""
 
 
 def classifier_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
-    """Classify a math problem and clean up how it is worded.
-
-    Args:
-        state: Current pipeline state (reads `user_input`).
-        llm: LLM client to use for classification.
-
-    Returns:
-        Updated pipeline state with `topic`, `difficulty` and
-        `problem_statement` set.
-    """
+    """Classify a math problem and clean up how it is worded."""
     prompt = f"Classify this math problem: '{state['user_input']}'"
     classification: Classification = llm.generate_structured(
         prompt, schema=Classification, system_prompt=CLASSIFIER_SYSTEM_PROMPT

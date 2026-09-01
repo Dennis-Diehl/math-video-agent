@@ -1,11 +1,6 @@
-"""codegen_node — turn planned scenes into runnable Manim scene code.
-
-Each scene is built from a fixed scaffold: the class definition, the subtitle
-and the Manim objects a scene needs (formulas, axes, tables) are generated
-deterministically, so the objects on screen always carry the exact expressions
-that were already validated in `solver_node`. Only the animation calls inside
-`construct()` come from the LLM, which turns the scene's free-text
-`animation_steps` into `self.play(...)` lines over those pre-built objects.
+"""codegen_node — turn planned scenes into runnable Manim scene code. Scaffold
+and objects are generated deterministically; only the animation calls
+inside `construct()` come from the LLM.
 """
 
 import json
@@ -21,12 +16,8 @@ from graph.media import whole_frames
 from graph.pipeline_state import PipelineState
 
 MAX_ANIMATION_ATTEMPTS = 3
-
-# Manim plays an animation over one second unless told otherwise.
-ANIMATION_SECONDS = 1.0
-
-# The shortest pause that still lets a viewer read what changed.
-MIN_PAUSE_SECONDS = 0.4
+ANIMATION_SECONDS = 1.0  # Manim's default animation duration
+MIN_PAUSE_SECONDS = 0.4  # shortest pause a viewer can still read
 
 PLAY_CALL = re.compile(r"^\s*self\.play\(")
 WAIT_CALL = re.compile(r"^(\s*)self\.wait\([^)]*\)\s*$")
@@ -92,46 +83,27 @@ class {class_name}(Scene):
 
 
 def _scene_expressions(state: PipelineState, scene: Scene) -> list[str]:
-    """Collect the solution-step expressions a scene covers.
-
-    `Scene.step_indices` is 1-based (it refers to the numbering the scene
-    planner saw), while `state["solution"]` is a 0-based list.
-    """
+    """Collect the solution-step expressions a scene covers. `step_indices`
+    is 1-based, `state["solution"]` is 0-based."""
     return [state["solution"][index - 1].expression for index in scene.step_indices]
 
 
 def _to_latex(expression: str) -> str:
-    """Render a sympy expression string as LaTeX, exactly as it was written.
-
-    Parsing is unevaluated so that a step showing an operation being carried
-    out survives: `Eq(x**2 - 4 + 4, 0 + 4)` has to stay on screen as written
-    instead of collapsing to `Eq(x**2, 4)`, which is what makes the
-    manipulation visible to the viewer.
-
-    `order="none"` keeps the terms where the solver put them. sympy otherwise
-    sorts them into its own canonical order, which would silently swap terms
-    between one step and the next — the viewer would see `d/dx x**3 + d/dx 2*x`
-    turn into `d/dx 2*x + d/dx x**3` for no reason they could follow.
+    """Render a sympy expression as LaTeX, exactly as written: unevaluated so
+    manipulations stay visible, `order="none"` so terms keep their position.
     """
     return sp.latex(sp.sympify(expression, evaluate=False), order="none")
 
 
 def _quote(value: str) -> str:
-    """Quote a string for embedding in generated Python source.
-
-    Uses JSON escaping so backslash-heavy LaTeX (`\\frac`, `\\left`) survives
-    being written into a source file and parsed back by Python.
-    """
+    """JSON-quote a string for embedding in generated Python source, so
+    backslash-heavy LaTeX survives round-tripping through a source file."""
     return json.dumps(value)
 
 
 def _wrap(narration: str) -> str:
-    """Break narration into subtitle lines of roughly equal length.
-
-    Wrapping keeps the subtitle at a constant font size; scaling a long
-    single line down to fit the frame would instead shrink the text of
-    every wordier scene.
-    """
+    """Break narration into subtitle lines of roughly equal length, keeping
+    the subtitle at a constant font size."""
     return "\n".join(textwrap.wrap(narration, width=SUBTITLE_LINE_LENGTH))
 
 
@@ -141,15 +113,9 @@ def _indent(code: str) -> str:
 
 
 def _split_latex(latex: str) -> list[str]:
-    """Split a LaTeX expression at its top-level `+`, `-` and `=` signs.
-
-    Building a `MathTex` from the pieces rather than one string makes each
-    term addressable by content via `get_part_by_tex`, so an animation can
-    highlight the term that just changed instead of the whole formula.
-
-    Each operator stays attached to the term it introduces, and anything
-    nested — braces, `\\left...\\right` pairs, `\\frac`, an exponent like
-    `x^{3 - 1}` — is left intact.
+    """Split a LaTeX expression at its top-level `+`, `-` and `=` signs, so
+    each term is addressable via `get_part_by_tex`. Nested braces, `\\left...
+    \\right` pairs and `\\frac` are left intact.
     """
     parts: list[str] = []
     current = ""
@@ -160,9 +126,7 @@ def _split_latex(latex: str) -> list[str]:
         char = latex[index]
 
         if char == "\\":
-            # Copy a control sequence whole, so \left, \right and \frac are
-            # never cut in the middle.
-            end = index + 1
+            end = index + 1  # copy the control sequence whole
             while end < len(latex) and (latex[end].isalpha() or end == index + 1):
                 end += 1
             token = latex[index:end]
@@ -195,11 +159,7 @@ def _split_latex(latex: str) -> list[str]:
 
 
 def _plottable(expressions: list[str]) -> tuple[sp.Expr, sp.Symbol] | None:
-    """Find the first expression that can be plotted as y = f(x).
-
-    Returns the expression and its single free symbol, or `None` if no
-    expression qualifies (multiple unknowns, a solution set, an equation).
-    """
+    """Find the first expression plottable as y = f(x), with its free symbol."""
     for expression in expressions:
         parsed = sp.sympify(expression)
         if not isinstance(parsed, sp.Expr) or parsed.is_number:
@@ -211,11 +171,7 @@ def _plottable(expressions: list[str]) -> tuple[sp.Expr, sp.Symbol] | None:
 
 
 def _setup_formulas(latex_formulas: list[str]) -> tuple[str, dict[str, list[str]]]:
-    """Create one `MathTex` per formula, centred in the frame.
-
-    Each formula is built from its individual terms so that animations can
-    address a single term with `get_part_by_tex`.
-    """
+    """Create one `MathTex` per formula, centred and built from its terms."""
     lines = []
     objects: dict[str, list[str]] = {}
     for position, latex in enumerate(latex_formulas, start=1):
@@ -257,12 +213,8 @@ def _setup_title(scene: Scene) -> tuple[str, dict[str, list[str]]]:
 
 def _build_setup(scene: Scene, expressions: list[str]) -> tuple[str, dict[str, list[str]], str]:
     """Build a scene's object setup, its objects, and any extra imports.
-
-    The objects map each name to the terms it can be addressed by, which is
-    empty for anything that is not a formula.
-
-    "geometry" and "diagram" fall back to showing formulas: drawing a
-    construction or a tree needs points/edges that no field on `Scene` carries.
+    "geometry"/"diagram" fall back to formulas, since `Scene` carries no
+    points/edges to draw a construction or tree from.
     """
     latex_formulas = [_to_latex(expression) for expression in expressions]
 
@@ -319,13 +271,8 @@ def _animation_prompt(scene: Scene, objects: dict[str, list[str]]) -> str:
 def _generate_animation(
     llm: BaseLLM, scene: Scene, objects: dict[str, list[str]], scaffold: str
 ) -> str:
-    """Ask the LLM for the scene's animation calls, retrying on invalid code.
-
-    The generated statements are compiled together with the scene scaffold, so
-    syntax errors are caught here instead of surfacing during rendering. After
-    `MAX_ANIMATION_ATTEMPTS` failures the scene falls back to simply showing
-    each object.
-    """
+    """Ask the LLM for the scene's animation calls, retrying on invalid code,
+    falling back to `_default_animation` after `MAX_ANIMATION_ATTEMPTS`."""
     prompt = _animation_prompt(scene, objects)
 
     for _ in range(MAX_ANIMATION_ATTEMPTS):
@@ -351,20 +298,8 @@ def _generate_animation(
 
 def _fit_timing(body: str, narration_seconds: float) -> str:
     """Stretch a scene's pauses so it lasts as long as its narration.
-
-    Manim runs an animation for a second and the generated code pauses for
-    another, giving a scene a fixed length regardless of what is being said.
-    The pauses absorb the difference; animations are never shortened, since
-    rushing them would hide the step the viewer has to follow. A scene whose
-    animations outlast its narration therefore ends after the words, and
-    `assembler_node` pads the audio to match.
-
-    Args:
-        body: The generated `self.play(...)` / `self.wait(...)` statements.
-        narration_seconds: How long this scene's narration takes to say.
-
-    Returns:
-        The same statements with the pause durations rewritten.
+    Animations are never shortened; `assembler_node` pads the audio if the
+    animations still outlast the narration.
     """
     lines = body.splitlines()
     animations = sum(1 for line in lines if PLAY_CALL.match(line))
@@ -375,12 +310,8 @@ def _fit_timing(body: str, narration_seconds: float) -> str:
     animation_seconds = animations * ANIMATION_SECONDS
     shortest = animation_seconds + len(pauses) * MIN_PAUSE_SECONDS
     target = max(narration_seconds, shortest)
-    # Rounded up: Manim truncates a partial frame, cutting the scene short.
     pause = whole_frames((target - animation_seconds) / len(pauses))
-
-    # Rounded up at the last digit so the printed value stays on its frame
-    # boundary: writing 8/15 as "0.53" would truncate back to seven frames.
-    written = math.ceil(pause * 10_000) / 10_000
+    written = math.ceil(pause * 10_000) / 10_000  # rounded up, stays on the frame boundary
 
     for index in pauses:
         indent = WAIT_CALL.match(lines[index]).group(1)  # type: ignore[union-attr]
@@ -409,21 +340,8 @@ def _render_scene(
 
 
 def fallback_code(scene: Scene, narration_seconds: float) -> str:
-    """Build a scene that shows only its title, for when the real one will not render.
-
-    Every part that can fail is left out: no LaTeX to typeset, no generated
-    animation calls, only the `Text` title and the subtitle the scaffold adds
-    anyway. `executor_node` renders this in place of a scene it could not get
-    working, so the narration still has a picture to sit on and the scene keeps
-    its slot in the video.
-
-    Args:
-        scene: The scene that failed to render.
-        narration_seconds: How long this scene's narration takes to say.
-
-    Returns:
-        A complete Manim module holding one scene class.
-    """
+    """Build a title-only scene, with no LaTeX or generated animation left to
+    fail, for `executor_node` to fall back to."""
     setup, objects = _setup_title(scene)
     scaffold = SCENE_TEMPLATE.format(
         extra_imports="",
@@ -438,17 +356,7 @@ def fallback_code(scene: Scene, narration_seconds: float) -> str:
 
 
 def codegen_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
-    """Generate Manim code for every planned scene.
-
-    Args:
-        state: Current pipeline state (reads `scenes`, `solution` and
-            `scene_durations`, which times each scene to its narration).
-        llm: LLM client used to turn each scene's `animation_steps` into
-            Manim animation calls.
-
-    Returns:
-        Updated pipeline state with `manim_codes` set, one entry per scene.
-    """
+    """Generate Manim code for every planned scene."""
     state["manim_codes"] = [
         _render_scene(state, scene, llm, narration_seconds)
         for scene, narration_seconds in zip(state["scenes"], state["scene_durations"])
