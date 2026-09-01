@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from config.llm.base import BaseLLM, T
-from config.schemas import SceneCode, Step
+from config.schemas import Scene, SceneCode, Step
 from graph.media import run_id, scene_stem
 from graph.pipeline_state import PipelineState
 from nodes import executor
@@ -29,6 +29,19 @@ class FakeLLM(BaseLLM):
 
 
 def make_state(problem: str, codes: list[str]) -> PipelineState:
+    # One scene per code: `executor_node` reads both when a render fails and it
+    # has to fall back to a title-only scene.
+    scenes = [
+        Scene(
+            number=number,
+            title="Factoring",
+            narration="We factor the equation.",
+            visual_type="equation",
+            animation_steps=["Show the equation"],
+            step_indices=[1],
+        )
+        for number in range(1, len(codes) + 1)
+    ]
     return {
         "user_input": problem,
         "problem_statement": problem,
@@ -36,11 +49,12 @@ def make_state(problem: str, codes: list[str]) -> PipelineState:
         "difficulty": "school",
         "solution": [Step(explanation="Start.", expression="Eq(x**2 - 4, 0)")],
         "solvable": True,
-        "scenes": [],
+        "scenes": scenes,
         "manim_codes": codes,
         "scene_videos": [],
         "audio_files": [],
-        "scene_durations": [],
+        "scene_durations": [4.0] * len(codes),
+        "final_video": "",
         "error": None,
     }
 
@@ -114,14 +128,15 @@ def test_executor_corrects_code_between_failed_attempts(monkeypatch: pytest.Monk
 
 
 def test_executor_reports_a_scene_it_could_not_render(monkeypatch: pytest.MonkeyPatch):
-    def always_fails(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
+    def fail_generated_code(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
+        if "Write(title)" in code:  # the title-only fallback scene
+            return Path("media/videos/x_scene_1/l/Scene1.mp4"), ""
         return None, "LaTeX error"
 
-    monkeypatch.setattr(executor, "_render", always_fails)
+    monkeypatch.setattr(executor, "_render", fail_generated_code)
     llm = FakeLLM()
     state = executor_node(make_state("Solve x**2 - 4 = 0", ["# broken"]), llm)
 
-    assert state["scene_videos"] == []
     assert state["error"] is not None
     assert "Scene 1" in state["error"]
     assert "LaTeX error" in state["error"]
@@ -129,14 +144,44 @@ def test_executor_reports_a_scene_it_could_not_render(monkeypatch: pytest.Monkey
     assert len(llm.prompts) == MAX_RENDER_ATTEMPTS - 1
 
 
+def test_executor_replaces_a_scene_it_could_not_render(monkeypatch: pytest.MonkeyPatch):
+    rendered: list[str] = []
+
+    def fail_generated_code(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
+        rendered.append(code)
+        if "Write(title)" in code:
+            return Path("media/videos/x_scene_1/l/Scene1.mp4"), ""
+        return None, "LaTeX error"
+
+    monkeypatch.setattr(executor, "_render", fail_generated_code)
+    state = executor_node(make_state("Solve x**2 - 4 = 0", ["# broken"]), FakeLLM())
+
+    # The scene keeps its slot, so audio and video stay paired by position.
+    assert len(state["scene_videos"]) == 1
+    assert state["scene_videos"][0] != ""
+    assert "Write(title)" in rendered[-1]
+
+
+def test_executor_leaves_a_gap_when_even_the_fallback_fails(monkeypatch: pytest.MonkeyPatch):
+    def always_fails(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
+        return None, "LaTeX error"
+
+    monkeypatch.setattr(executor, "_render", always_fails)
+    state = executor_node(make_state("Solve x**2 - 4 = 0", ["# broken"]), FakeLLM())
+
+    assert state["scene_videos"] == [""]
+    assert "Scene 1 fallback" in (state["error"] or "")
+
+
 def test_executor_keeps_rendered_scenes_when_one_fails(monkeypatch: pytest.MonkeyPatch):
     def fail_second(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
-        if scene_number == 2:
+        if scene_number == 2 and "Write(title)" not in code:
             return None, "LaTeX error"
         return Path(f"media/videos/x_scene_{scene_number}/l/Scene{scene_number}.mp4"), ""
 
     monkeypatch.setattr(executor, "_render", fail_second)
     state = executor_node(make_state("Solve x**2 - 4 = 0", ["# a", "# b", "# c"]), FakeLLM())
 
-    assert len(state["scene_videos"]) == 2
+    assert len(state["scene_videos"]) == 3
+    assert all(state["scene_videos"])
     assert "Scene 2" in (state["error"] or "")

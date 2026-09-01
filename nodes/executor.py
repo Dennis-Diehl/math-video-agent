@@ -16,6 +16,7 @@ from config.llm.base import BaseLLM
 from config.schemas import SceneCode
 from graph.media import MEDIA_DIR, RENDER_QUALITY, run_id, scene_dir, scene_stem
 from graph.pipeline_state import PipelineState
+from nodes.codegen import fallback_code
 
 MAX_RENDER_ATTEMPTS = 3
 RENDER_TIMEOUT_SECONDS = 300
@@ -138,14 +139,20 @@ def _render_with_retries(
 def executor_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """Render every scene, correcting code that fails to render.
 
+    A scene that still fails after every attempt is replaced by a title-only
+    scene rather than dropped, so its narration keeps a picture and the videos
+    stay aligned with `audio_files` position by position.
+
     Args:
-        state: Current pipeline state (reads `manim_codes` and
-            `problem_statement`, which names the directory of this run).
+        state: Current pipeline state (reads `manim_codes`, `scenes`,
+            `scene_durations`, and `problem_statement`, which names the
+            directory of this run).
         llm: LLM client used to correct code between failed render attempts.
 
     Returns:
-        Updated pipeline state with `scene_videos` set to the rendered videos,
-        and `error` describing the scenes that could not be rendered at all.
+        Updated pipeline state with `scene_videos` holding one entry per scene
+        — empty for a scene whose replacement would not render either — and
+        `error` reporting the scenes that had to be replaced.
     """
     run = run_id(state["problem_statement"])
     videos: list[str] = []
@@ -153,10 +160,16 @@ def executor_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
 
     for position, code in enumerate(state["manim_codes"], start=1):
         video, error = _render_with_retries(llm, code, run, position)
+
         if video is None:
             failures.append(f"Scene {position}: {error}")
-            continue
-        videos.append(str(video))
+            scene = state["scenes"][position - 1]
+            seconds = state["scene_durations"][position - 1]
+            video, error = _render(fallback_code(scene, seconds), run, position)
+            if video is None:
+                failures.append(f"Scene {position} fallback: {error}")
+
+        videos.append(str(video) if video is not None else "")
 
     state["scene_videos"] = videos
     state["error"] = "\n".join(failures) if failures else None

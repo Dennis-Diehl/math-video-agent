@@ -13,6 +13,7 @@ from nodes.codegen import (
     MIN_PAUSE_SECONDS,
     _fit_timing,
     codegen_node,
+    fallback_code,
 )
 
 
@@ -51,6 +52,7 @@ def make_state(scenes: list[Scene]) -> PipelineState:
         "manim_codes": [],
         "scene_videos": [],
         "audio_files": [],
+        "final_video": "",
         "error": None,
     }
 
@@ -335,3 +337,32 @@ def test_fit_timing_rounds_pauses_up_to_whole_frames():
         assert frames >= math.floor(frames) >= 1
         # Written high enough that truncating lands on the intended frame.
         assert math.floor(frames) == round(frames, 3) // 1
+
+
+def test_fallback_code_is_valid_python_with_one_scene_class():
+    code = fallback_code(make_scene(number=3), narration_seconds=4.0)
+
+    compile(code, "<fallback>", "exec")
+    assert "class Scene3(Scene):" in code
+
+
+def test_fallback_code_shows_the_title_and_narration():
+    code = fallback_code(make_scene(title="Eigenvalues"), narration_seconds=4.0)
+
+    assert "Eigenvalues" in code
+    assert "We factor the equation." in code
+
+
+def test_fallback_code_uses_no_latex():
+    # The replacement exists because the real scene would not render, so it
+    # must not depend on LaTeX typesetting either.
+    code = fallback_code(make_scene(), narration_seconds=4.0)
+
+    assert "MathTex" not in code
+
+
+def test_fallback_code_lasts_as_long_as_its_narration():
+    code = fallback_code(make_scene(), narration_seconds=6.0)
+
+    pause = float(re.search(r"self\.wait\(([\d.]+)\)", code).group(1))  # type: ignore[union-attr]
+    assert pause + ANIMATION_SECONDS >= 6.0

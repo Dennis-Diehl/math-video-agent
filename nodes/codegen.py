@@ -408,6 +408,35 @@ def _render_scene(
     return scaffold.replace(ANIMATION_PLACEHOLDER, body)
 
 
+def fallback_code(scene: Scene, narration_seconds: float) -> str:
+    """Build a scene that shows only its title, for when the real one will not render.
+
+    Every part that can fail is left out: no LaTeX to typeset, no generated
+    animation calls, only the `Text` title and the subtitle the scaffold adds
+    anyway. `executor_node` renders this in place of a scene it could not get
+    working, so the narration still has a picture to sit on and the scene keeps
+    its slot in the video.
+
+    Args:
+        scene: The scene that failed to render.
+        narration_seconds: How long this scene's narration takes to say.
+
+    Returns:
+        A complete Manim module holding one scene class.
+    """
+    setup, objects = _setup_title(scene)
+    scaffold = SCENE_TEMPLATE.format(
+        extra_imports="",
+        class_name=f"Scene{scene.number}",
+        narration=_quote(_wrap(scene.narration)),
+        setup=setup,
+        animation_body=ANIMATION_PLACEHOLDER,
+    )
+    body = _fit_timing(_indent(_default_animation(objects)), narration_seconds)
+
+    return scaffold.replace(ANIMATION_PLACEHOLDER, body)
+
+
 def codegen_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """Generate Manim code for every planned scene.
 
