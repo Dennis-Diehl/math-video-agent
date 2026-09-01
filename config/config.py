@@ -22,5 +22,8 @@ class Settings(BaseSettings):
     kokoro_voice: str = "af_heart"
     kokoro_lang_code: str = "a"  # american english
 
+    # API / job orchestration
+    job_output_dir: str = "media/jobs"
+
 
 settings = Settings()

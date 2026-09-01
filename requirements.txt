@@ -18,8 +18,5 @@ manim
 kokoro
 soundfile
 
-# Frontend
-streamlit
-
 # PDF input
 pymupdf

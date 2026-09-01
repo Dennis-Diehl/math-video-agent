@@ -1,5 +1,8 @@
 -r requirements.txt
+-r requirements-api.txt
 
 ruff
 mypy
 pytest
+pytest-asyncio
+httpx
