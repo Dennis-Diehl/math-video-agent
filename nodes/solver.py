@@ -1,3 +1,11 @@
+"""solver_node — solve a math problem into steps a video can show.
+
+sympy does the arithmetic, so the result shown in the video is computed rather
+than recalled. When sympy cannot solve the problem, the run stops here instead
+of falling back to an unverified answer: a video that confidently shows wrong
+working is worse than no video, and `error` tells the user what to change.
+"""
+
 import sympy as sp
 
 from config.llm.base import BaseLLM
@@ -5,6 +13,13 @@ from config.schemas import Extraction, Solution
 from graph.pipeline_state import PipelineState
 
 MAX_EXPLANATION_ATTEMPTS = 3
+
+# Appended to every failure message. The user cannot see what sympy choked on,
+# only their own wording, so the advice has to be about the wording.
+REPHRASE_HINT = (
+    " Try stating the problem more explicitly — name the variable to solve for and "
+    "write the operation out, for example 'differentiate x**3 + 2*x with respect to x'."
+)
 
 EXTRACTION_SYSTEM_PROMPT = """You are a math assistant that writes short sympy code snippets \
 to solve math problems.
@@ -86,7 +101,8 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
         llm: LLM client to use for solving.
 
     Returns:
-        Updated pipeline state with `solution` and `solvable` set.
+        Updated pipeline state with `solution` and `solvable` set, and `error`
+        naming what sympy could not do when the problem stays unsolved.
     """
 
     # Step1: Generate sympy code for the computation needed to solve the problem
@@ -98,13 +114,17 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
 
     # Step2: Execute the sympy code snippet to compute the solution
     namespace: dict[str, object] = {"sp": sp}
+    error: str | None = None
     try:
         exec(extraction.sympy_code, namespace)  # noqa: S102 — namespace limited to {"sp": sp}
         result = namespace.get("result")
         solvable = result is not None
-    except Exception:  # noqa: BLE001 — exec() of LLM-generated code can raise any exception type
+        if not solvable:
+            error = "sympy produced no result for this problem." + REPHRASE_HINT
+    except Exception as e:  # noqa: BLE001 — exec() of LLM-generated code can raise any exception type
         result = None
         solvable = False
+        error = f"sympy could not evaluate this problem: {e}" + REPHRASE_HINT
 
     # Step3: Convert the result into a step-by-step solution explanation
     if solvable:
@@ -113,6 +133,7 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
             "write a step-by-step solution leading to this result."
         )
         solution = Solution(steps=[])
+        unparsed = ""
         for _ in range(MAX_EXPLANATION_ATTEMPTS):
             candidate: Solution = llm.generate_structured(
                 prompt=prompt,
@@ -127,6 +148,7 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
                 solution = candidate
                 break
             except Exception as e:  # noqa: BLE001 — sp.sympify() can raise any exception type on invalid syntax
+                unparsed = str(e)
                 prompt = (
                     f"Given the problem '{state['problem_statement']}' and the final result '{result}', "
                     "write a step-by-step solution leading to this result.\n"
@@ -135,10 +157,12 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
                 )
         else:
             solvable = False
+            error = f"The solution steps could not be parsed: {unparsed}" + REPHRASE_HINT
     else:
         solution = Solution(steps=[])
 
     state["solution"] = solution.steps
     state["solvable"] = solvable
+    state["error"] = error
 
     return state
