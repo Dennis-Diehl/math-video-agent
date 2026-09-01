@@ -43,6 +43,7 @@ def make_state(problem: str, scenes: list[Scene]) -> PipelineState:
         "scene_videos": [],
         "audio_files": [],
         "scene_durations": [],
+        "final_video": "",
         "error": None,
     }
 
