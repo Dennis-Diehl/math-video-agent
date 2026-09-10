@@ -34,6 +34,11 @@ class JobSubmitted(BaseModel):
     queue_position: int
 
 
+@app.get("/health")
+def health() -> dict[str, str]:
+    return {"status": "ok"}
+
+
 @app.post("/jobs")
 def create_job(request: JobRequest) -> JobSubmitted:
     job_id = uuid.uuid4().hex

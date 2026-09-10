@@ -24,6 +24,13 @@ def client() -> Iterator[TestClient]:
         yield test_client
 
 
+def test_health_returns_ok(client: TestClient):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
 def test_create_job_returns_a_job_id_and_position(client: TestClient):
     response = client.post("/jobs", json={"problem": "Solve x^2 - 4 = 0"})
 

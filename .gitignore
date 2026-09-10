@@ -220,6 +220,7 @@ __marimo__/
 # Plan
 ProjectPlan.md
 docs/
+.superpowers/
 
 # ignore experimental files
 experiments/

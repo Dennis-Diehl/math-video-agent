@@ -55,10 +55,16 @@ def queue_position(job_id: str) -> int | None:
 
 
 def get_status(job_id: str) -> dict[str, object] | None:
-    """Snapshot for GET /jobs/{id}: status, live queue position, video once done."""
+    """Snapshot for GET /jobs/{id}: status, live queue position, video once done.
+
+    Falls back to disk for a `job_id` the in-memory store no longer knows
+    about (lost on an API server restart) — its output survives on disk, so
+    history from before a restart can still be served as `done`.
+    """
     job = _jobs.get(job_id)
     if job is None:
-        return None
+        video = _output_dir(job_id) / "final.mp4"
+        return {"status": "done", "video": str(video)} if video.exists() else None
 
     result: dict[str, object] = {"status": job["status"]}
     if job["status"] == "queued":

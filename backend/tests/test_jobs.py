@@ -79,6 +79,15 @@ def test_get_status_is_none_for_an_unknown_job():
     assert jobs.get_status("nonexistent") is None
 
 
+def test_get_status_falls_back_to_disk_for_a_job_the_store_forgot(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs.settings, "job_output_dir", str(tmp_path))
+    video = tmp_path / "restarted" / "final.mp4"
+    video.parent.mkdir()
+    video.write_bytes(b"fake video")
+
+    assert jobs.get_status("restarted") == {"status": "done", "video": str(video)}
+
+
 async def test_run_records_every_line_and_the_final_status(monkeypatch: pytest.MonkeyPatch):
     jobs.submit("abc", "Solve x^2 - 4 = 0")
     process = FakeProcess(
