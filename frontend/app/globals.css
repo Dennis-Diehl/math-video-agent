@@ -1,0 +1,66 @@
+@import "tailwindcss";
+
+:root,
+:root[data-theme="dark"] {
+  --bg: #0f172a;
+  --bg-panel: #1e293b;
+  --fg: #e2e8f0;
+  --fg-muted: #94a3b8;
+  --accent: #d97706;
+  --accent-fg: #0f172a;
+  --border: #1e293b;
+  --bubble-user-bg: #1e3a5f;
+  --bubble-system-bg: #1e293b;
+  --error-bg: #3f1d1d;
+  --error-border: #f87171;
+  --error-fg: #fecaca;
+}
+
+:root[data-theme="light"] {
+  --bg: #ffffff;
+  --bg-panel: #f8fafc;
+  --fg: #0f172a;
+  --fg-muted: #64748b;
+  --accent: #2563eb;
+  --accent-fg: #ffffff;
+  --border: #e2e8f0;
+  --bubble-user-bg: #eff6ff;
+  --bubble-system-bg: #ffffff;
+  --error-bg: #fef2f2;
+  --error-border: #fca5a5;
+  --error-fg: #991b1b;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.panel {
+  background: var(--bg-panel);
+  border-color: var(--border);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+.bubble-user {
+  background: var(--bubble-user-bg);
+}
+
+.bubble-system {
+  background: var(--bubble-system-bg);
+  border: 1px solid var(--border);
+}
+
+.alert-error {
+  background: var(--error-bg);
+  border-color: var(--error-border);
+  color: var(--error-fg);
+}
+
+.text-muted {
+  color: var(--fg-muted);
+}
