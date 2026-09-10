@@ -9,22 +9,18 @@
   <img src="https://img.shields.io/badge/license-MIT-green" />
 </p>
 
-**An AI agent that turns a math problem into an animated explanation video.**
+**An AI agent that turns a math problem into a narrated animated explanation video.**
 
-A user types a math problem in plain English. The agent solves it with sympy, plans it into scenes, generates a Manim animation for each one, narrates it with TTS, and assembles everything into one MP4. The whole pipeline is orchestrated with LangGraph and runs in a sandboxed Docker container per job, with a Next.js frontend and a FastAPI backend on top.
+A multi-step LangGraph pipeline solves the problem, plans it into scenes, generates and renders Manim animations, and narrates each one with TTS, exposed through a FastAPI backend and a Next.js frontend.
 
 ---
 
 ## Features
 
-- Solves algebra, geometry, trigonometry, calculus, linear algebra, and probability problems
 - Verifies every answer with sympy instead of trusting the LLM's arithmetic
-- Breaks the solution into scenes and generates Manim animation code for each one
-- Adds spoken narration per scene with local TTS, timed to match each animation
-- Retries failed renders with LLM-corrected code, falling back to a simplified scene if it still fails
-- Streams live progress to the frontend over a WebSocket while a video is generated
-- Keeps job history in the browser's local storage, with jobs resumable after a page reload
-- Falls back to disk-stored job state if the API restarts mid-run
+- Self-corrects failed animation renders by feeding the error back to the LLM, with a graceful fallback
+- Runs every job in an isolated, resource-limited Docker sandbox
+- Streams live pipeline progress to the frontend over a WebSocket
 
 ---
 
@@ -80,11 +76,10 @@ flowchart LR
 
 ## Technical Highlights
 
-- **Per-node error handling**: every node owns its own failure path instead of a shared corrector or fallback node. `executor_node` retries a scene's Manim code with an LLM-corrected version up to 3 times, then falls back to a title-only scene so scene count always stays aligned with the narration. `solver_node` ends the run with a clear message when sympy genuinely cannot solve the problem, rather than letting the LLM invent an answer.
-- **Narration drives scene timing, not the reverse**: TTS runs before code generation, so generated Manim code can stretch its pauses to match the narration's actual measured length. Animations are never shortened to fit; a scene simply runs a little past its narration, and the assembler pads the audio to match.
-- **Sandboxed, restartable jobs**: each submitted job runs the full pipeline inside its own throwaway Docker container, talking to the host Docker daemon over the mounted socket. Output is written to disk keyed by a hash of the problem, so a job's status can still be served correctly even after the API restarts and loses its in-memory job state.
-- **Faststart video assembly**: the final ffmpeg concat pass keeps `+faststart`, moving the file's index to the front. Without it, ffprobe and desktop players still find the audio track, but a browser starts decoding before it reaches the index and plays the video silently.
-- **Constrained structured output**: classification and scene-type fields use `Literal` types with Gemini's schema-constrained generation, so the API is structurally unable to return a value like `"Algebra"` or a translated string outside the allowed set.
+- **Per-node error handling**: every node owns its own failure path instead of a shared corrector node. `executor_node` retries with LLM-corrected code, then falls back to a title-only scene rather than dropping it.
+- **Narration drives scene timing, not the reverse**: TTS runs before code generation, so animations stretch to match narration length instead of speech getting cut off.
+- **Sandboxed, restartable jobs**: each job runs in its own throwaway Docker container, with output on disk so status survives an API restart.
+- **Constrained structured output**: classification fields use `Literal` types with Gemini's schema-constrained generation, so the API is structurally unable to return an inconsistent value.
 
 ---
 
@@ -110,17 +105,17 @@ flowchart LR
 ```
 math-video-agent/
 ├── backend/
-│   ├── .env.example       # Template for backend/.env
-│   ├── api/              # FastAPI app, job queue, sandbox orchestration
-│   ├── config/            # Settings, LLM/TTS abstractions, structured-output schemas
-│   ├── graph/              # LangGraph pipeline assembly, state, media paths
-│   ├── nodes/              # One file per pipeline node
+│   ├── .env.example  # Template for backend/.env
+│   ├── api/          # FastAPI app, job queue, sandbox orchestration
+│   ├── config/       # Settings, LLM/TTS abstractions, structured-output schemas
+│   ├── graph/        # LangGraph pipeline assembly, state, media paths
+│   ├── nodes/        # One file per pipeline node
 │   └── tests/
 ├── frontend/
 │   └── src/
-│       ├── app/            # Next.js app router
-│       ├── components/      # Chat UI, sidebar, job progress, video player
-│       └── hooks/           # Job submission, WebSocket, local history
+│       ├── app/          # Next.js app router
+│       ├── components/   # Chat UI, sidebar, job progress, video player
+│       └── hooks/        # Job submission, WebSocket, local history
 ├── docker-compose.yml
 └── justfile
 ```
@@ -132,7 +127,7 @@ math-video-agent/
 Requires Docker and Docker Compose.
 
 ```bash
-git clone https://github.com/<user>/math-video-agent.git
+git clone https://github.com/Dennis-Diehl/math-video-agent.git
 cd math-video-agent
 just up
 ```
@@ -142,22 +137,22 @@ The frontend is then available at `http://localhost:3000`, the API at `http://lo
 Common `just` recipes:
 
 ```bash
-just backend-install      # set up backend/.venv with runtime + dev deps
-just backend-dev           # run the API locally with auto-reload
-just backend-test          # run backend tests
-just backend-check         # lint + format-check + type-check the backend
+just backend-install    # set up backend/.venv with runtime + dev deps
+just backend-dev        # run the API locally with auto-reload
+just backend-test       # run backend tests
+just backend-check      # lint + format-check + type-check the backend
 
-just frontend-install      # install frontend dependencies
-just frontend-dev           # run the frontend dev server
-just frontend-test          # run frontend tests
-just frontend-check          # type-check + lint the frontend
+just frontend-install   # install frontend dependencies
+just frontend-dev       # run the frontend dev server
+just frontend-test      # run frontend tests
+just frontend-check     # type-check + lint the frontend
 
-just test                  # run backend + frontend test suites
-just check                  # run backend + frontend lint/type checks
+just test               # run backend + frontend test suites
+just check              # run backend + frontend lint/type checks
 
-just up                    # build and start the full stack via Docker Compose
-just down                  # stop and remove the stack
-just logs                   # tail logs from the running stack
+just up                 # build and start the full stack via Docker Compose
+just down               # stop and remove the stack
+just logs               # tail logs from the running stack
 ```
 
 ---
