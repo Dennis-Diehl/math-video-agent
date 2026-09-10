@@ -158,6 +158,20 @@ async def test_run_synthesizes_an_error_when_the_container_produces_no_result(
     assert jobs.get_log("abc")[-1]["node"] is None
 
 
+async def test_get_status_includes_detail_after_an_error(monkeypatch: pytest.MonkeyPatch):
+    jobs.submit("abc", "Solve x^2 - 4 = 0")
+    process = FakeProcess([make_line(None, status="error", detail="sympy could not solve this.")])
+
+    async def fake_start_container(job_id: str, problem: str) -> FakeProcess:
+        return process
+
+    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
+
+    await jobs._run("abc", "Solve x^2 - 4 = 0")
+
+    assert jobs.get_status("abc") == {"status": "error", "detail": "sympy could not solve this."}
+
+
 async def test_run_reports_an_error_when_the_container_cannot_start(
     monkeypatch: pytest.MonkeyPatch,
 ):

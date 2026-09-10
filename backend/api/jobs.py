@@ -24,6 +24,7 @@ class JobState(TypedDict):
     status: Status
     log: list[ProgressLine]
     video: str | None
+    detail: str | None
     subscribers: list["asyncio.Queue[ProgressLine]"]
 
 
@@ -40,7 +41,13 @@ def _output_dir(job_id: str) -> Path:
 
 def submit(job_id: str, problem: str) -> int:
     """Register a new job and queue it. Returns its 1-based position in line."""
-    _jobs[job_id] = {"status": "queued", "log": [], "video": None, "subscribers": []}
+    _jobs[job_id] = {
+        "status": "queued",
+        "log": [],
+        "video": None,
+        "detail": None,
+        "subscribers": [],
+    }
     _queue_order.append(job_id)
     _pending.put_nowait((job_id, problem))
     return len(_queue_order)
@@ -71,6 +78,8 @@ def get_status(job_id: str) -> dict[str, object] | None:
         result["queue_position"] = queue_position(job_id)
     if job["video"]:
         result["video"] = job["video"]
+    if job["detail"]:
+        result["detail"] = job["detail"]
     return result
 
 
@@ -131,6 +140,7 @@ def _fail(job_id: str, detail: str) -> None:
     error_line: ProgressLine = {"node": None, "status": "error", "detail": detail, "video": None}
     _record(job_id, error_line)
     _jobs[job_id]["status"] = "error"
+    _jobs[job_id]["detail"] = detail
 
 
 async def _run(job_id: str, problem: str) -> None:
@@ -162,6 +172,7 @@ async def _run(job_id: str, problem: str) -> None:
                 if line["node"] is None:
                     saw_result = True
                     job["status"] = line["status"]
+                    job["detail"] = line["detail"]
                     # Not line["video"]: that path is inside the removed container.
                     if line["status"] == "done":
                         job["video"] = str(_output_dir(job_id) / "final.mp4")
