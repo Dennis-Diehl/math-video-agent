@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     # API / job orchestration
     job_output_dir: str = "media/jobs"
+    frontend_origin: str = "http://localhost:3000"
 
 
 settings = Settings()

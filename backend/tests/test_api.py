@@ -31,6 +31,19 @@ def test_health_returns_ok(client: TestClient):
     assert response.json() == {"status": "ok"}
 
 
+def test_cors_preflight_allows_the_frontend_origin(client: TestClient):
+    response = client.options(
+        "/jobs",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
 def test_create_job_returns_a_job_id_and_position(client: TestClient):
     response = client.post("/jobs", json={"problem": "Solve x^2 - 4 = 0"})
 
