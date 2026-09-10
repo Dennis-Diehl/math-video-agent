@@ -49,7 +49,19 @@ def run(pipeline: CompiledStateGraph, problem: str) -> Iterator[ProgressLine]:
 
 
 def main() -> None:
-    """Read the job from the environment, run it, print progress, save the video."""
+    """Read the job from the environment, run it, print progress, save the video.
+
+    `run()`'s generator is consumed lazily here, so an exception any node raises
+    (e.g. an LLM call failing outright, not just sympy/render failures the nodes
+    already catch themselves) surfaces when this loop pulls the next line, not
+    inside `run()`. Catching it here, around the loop, means the process still
+    exits 0 with a terminal `ProgressLine` instead of dying with a bare
+    traceback and a non-zero exit code — which `api/jobs.py` cannot tell apart
+    from a genuine infra failure (container wouldn't start, OOM-killed) and
+    reports as the generic "stopped unexpectedly" message. This is a sandbox
+    entrypoint safety net, not node-level error handling: it says nothing about
+    *why* a node failed, only that one did.
+    """
     problem = os.environ["PROBLEM"]
     pipeline = build_pipeline(
         llm=GeminiLLM(settings.gemini_model_flash, settings.gemini_api_key),
@@ -57,11 +69,24 @@ def main() -> None:
         tts=KokoroTTS(settings.kokoro_voice, settings.kokoro_lang_code),
     )
 
-    for line in run(pipeline, problem):
-        print(json.dumps(line), flush=True)  # flush: the parent reads this live, not at exit
-        if line["video"]:
-            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            shutil.copy(line["video"], OUTPUT_DIR / "final.mp4")
+    try:
+        for line in run(pipeline, problem):
+            print(json.dumps(line), flush=True)  # flush: the parent reads this live, not at exit
+            if line["video"]:
+                OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copy(line["video"], OUTPUT_DIR / "final.mp4")
+    except Exception as e:  # noqa: BLE001 — any node can raise any exception type; this is the last resort
+        # No REPHRASE_HINT here: this catch-all also covers non-wording failures
+        # (an API error, a network blip) where telling the user to rephrase
+        # would be actively misleading. Nodes that know a failure is about the
+        # user's wording already say so themselves (see solver_node).
+        error_line: ProgressLine = {
+            "node": None,
+            "status": "error",
+            "detail": f"The pipeline could not process this problem: {e}",
+            "video": None,
+        }
+        print(json.dumps(error_line), flush=True)
 
 
 if __name__ == "__main__":

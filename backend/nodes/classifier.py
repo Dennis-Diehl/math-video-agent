@@ -3,6 +3,7 @@
 from config.llm.base import BaseLLM
 from config.schemas import Classification
 from graph.pipeline_state import PipelineState
+from nodes.solver import REPHRASE_HINT
 
 CLASSIFIER_SYSTEM_PROMPT = """You are a math assistant reading a problem a student typed in.
 
@@ -27,11 +28,17 @@ The problem's `topic`, its `difficulty`, and the restated `problem_statement`.""
 def classifier_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """Classify a math problem and clean up how it is worded."""
     prompt = f"Classify this math problem: '{state['user_input']}'"
-    classification: Classification = llm.generate_structured(
-        prompt, schema=Classification, system_prompt=CLASSIFIER_SYSTEM_PROMPT
-    )
+    try:
+        classification: Classification = llm.generate_structured(
+            prompt, schema=Classification, system_prompt=CLASSIFIER_SYSTEM_PROMPT
+        )
+    except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
+        state["error"] = f"Could not understand this as a math problem: {e}" + REPHRASE_HINT
+        return state
+
     state["topic"] = classification.topic
     state["difficulty"] = classification.difficulty
     state["problem_statement"] = classification.problem_statement
+    state["error"] = None
 
     return state

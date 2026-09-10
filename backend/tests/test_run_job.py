@@ -1,9 +1,13 @@
+import json
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from graph import run_job
 from graph.pipeline import build_pipeline
-from graph.run_job import run
+from graph.run_job import main, run
 from nodes import assembler, executor
 from tests.test_pipeline import FakeLLM, FakeTTS
 
@@ -62,3 +66,39 @@ def test_run_stops_early_and_reports_an_error_when_unsolvable(no_subprocesses: N
     assert lines[-1]["status"] == "error"
     assert lines[-1]["video"] is None
     assert "sympy could not evaluate" in (lines[-1]["detail"] or "")
+
+
+class _ExplodingPipeline:
+    """Fake compiled pipeline whose `.stream()` yields a normal update, then
+    raises — simulating a node hitting an uncaught exception (e.g. an LLM
+    call failing outright, not a sympy/render failure the node already
+    handles itself)."""
+
+    def stream(self, state: dict[str, Any]) -> Iterator[dict[str, Any]]:
+        yield {"classifier": {**state, "error": None}}
+        raise RuntimeError("boom: the LLM call failed")
+
+
+def test_main_reports_a_terminal_error_line_when_a_node_raises_uncaught(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A node raising mid-stream must still produce a terminal `node: None`
+    line with a real error message, not a silent process crash."""
+    monkeypatch.setenv("PROBLEM", "hallo")
+    monkeypatch.setattr(run_job, "build_pipeline", lambda **kwargs: _ExplodingPipeline())
+    monkeypatch.setattr(run_job, "GeminiLLM", lambda *args, **kwargs: object())
+    monkeypatch.setattr(run_job, "KokoroTTS", lambda *args, **kwargs: object())
+
+    main()
+
+    lines = [json.loads(text) for text in capsys.readouterr().out.splitlines()]
+
+    assert [line["node"] for line in lines] == ["classifier", None]
+    result = lines[-1]
+    assert result["status"] == "error"
+    assert result["video"] is None
+    assert result["detail"] is not None
+    assert "boom: the LLM call failed" in result["detail"]
+    # Not the generic infra-level fallback api/jobs.py falls back to when no
+    # terminal line is ever seen.
+    assert "stopped unexpectedly" not in result["detail"]

@@ -18,10 +18,13 @@ from nodes.codegen import (
 
 
 class FakeLLM(BaseLLM):
-    """A `BaseLLM` that returns canned animation code and records its prompts."""
+    """A `BaseLLM` that returns canned animation code and records its prompts.
+    `raises`, if set, is raised instead of answering, simulating the LLM call
+    itself failing outright."""
 
-    def __init__(self, responses: list[str]):
+    def __init__(self, responses: list[str], raises: Exception | None = None):
         self.responses = responses
+        self.raises = raises
         self.prompts: list[str] = []
 
     def generate(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -31,6 +34,8 @@ class FakeLLM(BaseLLM):
         self, prompt: str, schema: type[T], system_prompt: str | None = None
     ) -> T:
         self.prompts.append(prompt)
+        if self.raises is not None:
+            raise self.raises
         code = self.responses[min(len(self.prompts) - 1, len(self.responses) - 1)]
         return schema.model_validate(AnimationCode(code=code).model_dump())
 
@@ -139,6 +144,40 @@ def test_codegen_retries_when_generated_code_has_a_syntax_error():
     assert len(llm.prompts) == 2
     assert "not valid Python" in llm.prompts[1]
     assert "        self.play(Write(formula_1))" in code
+
+
+def test_codegen_reports_the_error_when_the_llm_call_fails():
+    llm = FakeLLM([], raises=ValueError("Gemini returned no text"))
+    state = make_state([make_scene()])
+
+    state = codegen_node(state, llm)
+
+    assert state["manim_codes"] == []
+    assert state["error"] is not None
+    assert "Could not generate the animation code for a scene" in state["error"]
+    # Not a wording problem — the problem and scenes are already settled by
+    # this point — so no REPHRASE_HINT-style advice is appended.
+    assert "rephrase" not in state["error"].lower()
+    assert "explicitly" not in state["error"]
+
+
+def test_codegen_llm_failure_does_not_retry():
+    llm = FakeLLM([], raises=ValueError("Gemini returned no text"))
+    state = make_state([make_scene()])
+
+    codegen_node(state, llm)
+
+    # An LLM-level failure is not "this attempt was bad code" — retrying with
+    # a different prompt would not help, so it ends the node immediately.
+    assert len(llm.prompts) == 1
+
+
+def test_codegen_clears_an_error_from_an_earlier_run():
+    llm = FakeLLM(["self.play(Write(formula_1))"])
+    state = make_state([make_scene()])
+    state["error"] = "left over from a previous run"
+
+    assert codegen_node(state, llm)["error"] is None
 
 
 def test_codegen_falls_back_after_exhausting_attempts():

@@ -180,6 +180,13 @@ async def _run(job_id: str, problem: str) -> None:
     except TimeoutError:
         process.kill()
         await process.wait()
+        _fail(
+            job_id,
+            f"This problem took longer than {CONTAINER_TIMEOUT_SECONDS // 60} minutes to "
+            "process and was stopped. Try a simpler problem, or try again — this can "
+            "happen if the AI service is temporarily slow.",
+        )
+        return
 
     if not saw_result:
         _fail(job_id, f"The job stopped unexpectedly (exit code {process.returncode}).")

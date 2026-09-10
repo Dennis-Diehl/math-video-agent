@@ -16,10 +16,15 @@ def tts_node(state: PipelineState, tts: BaseTTS) -> PipelineState:
     durations: list[float] = []
     for scene in state["scenes"]:
         destination = directory / f"{scene_stem(run, scene.number)}.wav"
-        durations.append(tts.synthesize(scene.narration, destination))
+        try:
+            durations.append(tts.synthesize(scene.narration, destination))
+        except Exception as e:  # noqa: BLE001 — the TTS call can raise any exception type
+            state["error"] = f"Could not generate narration for this explanation: {e}"
+            return state
         audio_files.append(str(destination))
 
     state["audio_files"] = audio_files
     state["scene_durations"] = durations
+    state["error"] = None
 
     return state

@@ -10,11 +10,14 @@ from nodes.tts import tts_node
 class FakeTTS(BaseTTS):
     """A `BaseTTS` that records what it was asked to say instead of speaking."""
 
-    def __init__(self, seconds: float = 3.0) -> None:
+    def __init__(self, seconds: float = 3.0, raises: Exception | None = None) -> None:
         self.seconds = seconds
+        self.raises = raises
         self.spoken: list[tuple[str, Path]] = []
 
     def synthesize(self, text: str, destination: Path) -> float:
+        if self.raises is not None:
+            raise self.raises
         self.spoken.append((text, destination))
         return self.seconds
 
@@ -105,3 +108,32 @@ def test_tts_handles_a_solution_with_no_scenes():
 
     assert state["audio_files"] == []
     assert tts.spoken == []
+
+
+def test_tts_reports_the_error_when_synthesis_fails():
+    tts = FakeTTS(raises=RuntimeError("model failed to load"))
+    scenes = [make_scene(1, "First scene.")]
+
+    state = tts_node(make_state("Solve x**2 - 4 = 0", scenes), tts)
+
+    assert state["audio_files"] == []
+    assert state["error"] is not None
+    assert "Could not generate narration for this explanation" in state["error"]
+
+
+def test_tts_error_does_not_suggest_rephrasing():
+    tts = FakeTTS(raises=RuntimeError("model failed to load"))
+    scenes = [make_scene(1, "First scene.")]
+
+    state = tts_node(make_state("Solve x**2 - 4 = 0", scenes), tts)
+
+    assert state["error"] is not None
+    assert "more explicitly" not in state["error"]
+
+
+def test_tts_clears_an_error_from_an_earlier_run():
+    tts = FakeTTS()
+    state = make_state("Solve x**2 - 4 = 0", [make_scene(1, "First.")])
+    state["error"] = "left over from a previous run"
+
+    assert tts_node(state, tts)["error"] is None

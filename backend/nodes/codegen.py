@@ -24,6 +24,17 @@ WAIT_CALL = re.compile(r"^(\s*)self\.wait\([^)]*\)\s*$")
 
 ANIMATION_PLACEHOLDER = "___ANIMATION_BODY___"
 
+
+class AnimationGenerationError(Exception):
+    """Raised when the LLM call for a scene's animation code fails outright.
+
+    Distinct from the `SyntaxError` handling in `_generate_animation`, which
+    reacts to bad code from a call that succeeded: an API/network failure of
+    the call itself is not "this attempt was bad" — retrying with a different
+    prompt would not help — so it ends `codegen_node` instead of looping.
+    """
+
+
 ANIMATION_SYSTEM_PROMPT = """You write the animation calls for one scene of a Manim math video.
 
 ### Rules
@@ -276,11 +287,14 @@ def _generate_animation(
     prompt = _animation_prompt(scene, objects)
 
     for _ in range(MAX_ANIMATION_ATTEMPTS):
-        animation: AnimationCode = llm.generate_structured(
-            prompt=prompt,
-            schema=AnimationCode,
-            system_prompt=ANIMATION_SYSTEM_PROMPT,
-        )
+        try:
+            animation: AnimationCode = llm.generate_structured(
+                prompt=prompt,
+                schema=AnimationCode,
+                system_prompt=ANIMATION_SYSTEM_PROMPT,
+            )
+        except Exception as e:
+            raise AnimationGenerationError(str(e)) from e
         body = _indent(animation.code)
         try:
             compile(scaffold.replace(ANIMATION_PLACEHOLDER, body), "<scene>", "exec")
@@ -357,9 +371,14 @@ def fallback_code(scene: Scene, narration_seconds: float) -> str:
 
 def codegen_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """Generate Manim code for every planned scene."""
-    state["manim_codes"] = [
-        _render_scene(state, scene, llm, narration_seconds)
-        for scene, narration_seconds in zip(state["scenes"], state["scene_durations"])
-    ]
+    try:
+        state["manim_codes"] = [
+            _render_scene(state, scene, llm, narration_seconds)
+            for scene, narration_seconds in zip(state["scenes"], state["scene_durations"])
+        ]
+    except AnimationGenerationError as e:
+        state["error"] = f"Could not generate the animation code for a scene: {e}"
+        return state
 
+    state["error"] = None
     return state

@@ -9,12 +9,20 @@ class FakeLLM(BaseLLM):
 
     `solver_node` calls it twice with different schemas: once for `Extraction`,
     then repeatedly for `Solution`. The schema decides which canned answer to
-    hand back, so a test only has to state the two it cares about.
+    hand back, so a test only has to state the two it cares about. `fails_on`
+    raises instead of answering, for the schema named, to simulate that call's
+    LLM request failing outright.
     """
 
-    def __init__(self, sympy_code: str, steps: list[Step] | None = None):
+    def __init__(
+        self,
+        sympy_code: str,
+        steps: list[Step] | None = None,
+        fails_on: str | None = None,
+    ):
         self.sympy_code = sympy_code
         self.steps = steps if steps is not None else [Step(explanation="Start.", expression="x")]
+        self.fails_on = fails_on
         self.prompts: list[str] = []
 
     def generate(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -24,6 +32,8 @@ class FakeLLM(BaseLLM):
         self, prompt: str, schema: type[T], system_prompt: str | None = None
     ) -> T:
         self.prompts.append(prompt)
+        if schema.__name__ == self.fails_on:
+            raise ValueError("Gemini returned no text")
         if schema is Extraction:
             return schema.model_validate(Extraction(sympy_code=self.sympy_code).model_dump())
         return schema.model_validate(Solution(steps=self.steps).model_dump())
@@ -114,3 +124,29 @@ def test_solver_clears_an_error_from_an_earlier_run():
     state["error"] = "left over from a previous run"
 
     assert solver_node(state, llm)["error"] is None
+
+
+def test_solver_reports_the_error_when_the_extraction_call_fails():
+    llm = FakeLLM(sympy_code="result = sp.Integer(2)", fails_on="Extraction")
+
+    state = solver_node(make_state("Solve x = 2"), llm)
+
+    assert state["solvable"] is False
+    assert state["error"] is not None
+    assert "Could not extract the math from this problem" in state["error"]
+    assert "more explicitly" in state["error"]
+
+
+def test_solver_reports_the_error_when_the_candidate_generation_call_fails():
+    llm = FakeLLM(sympy_code="result = sp.Integer(2)", fails_on="Solution")
+
+    state = solver_node(make_state("Solve x = 2"), llm)
+
+    assert state["solvable"] is False
+    assert state["solution"] == []
+    assert state["error"] is not None
+    assert "Could not generate a solution for this problem" in state["error"]
+    assert "more explicitly" in state["error"]
+    # The LLM call itself failing is not "this candidate was bad" — it ends
+    # the node immediately rather than retrying with a different candidate.
+    assert len(llm.prompts) == 2

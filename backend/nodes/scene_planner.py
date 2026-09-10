@@ -50,15 +50,20 @@ def scene_planner_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
         for i, step in enumerate(state["solution"])
     )
 
-    scene_plan: ScenePlan = llm.generate_structured(
-        prompt=(
-            f"Problem the video explains: '{state['problem_statement']}'\n\n"
-            f"Group the following solution steps into a video scene plan:\n\n{steps_text}"
-        ),
-        schema=ScenePlan,
-        system_prompt=SCENE_PLANNER_SYSTEM_PROMPT,
-    )
+    try:
+        scene_plan: ScenePlan = llm.generate_structured(
+            prompt=(
+                f"Problem the video explains: '{state['problem_statement']}'\n\n"
+                f"Group the following solution steps into a video scene plan:\n\n{steps_text}"
+            ),
+            schema=ScenePlan,
+            system_prompt=SCENE_PLANNER_SYSTEM_PROMPT,
+        )
+    except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
+        state["error"] = f"Could not plan the animation for this solution: {e}"
+        return state
 
     state["scenes"] = scene_plan.scenes
+    state["error"] = None
 
     return state

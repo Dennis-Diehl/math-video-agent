@@ -89,11 +89,15 @@ A list of steps, each with an `explanation` and an `expression`."""
 
 def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
     """Solve a math problem, setting `solution`/`solvable`/`error`."""
-    extraction: Extraction = llm.generate_structured(
-        prompt=f"Write a sympy code snippet from this problem: '{state['problem_statement']}'",
-        schema=Extraction,
-        system_prompt=EXTRACTION_SYSTEM_PROMPT,
-    )
+    try:
+        extraction: Extraction = llm.generate_structured(
+            prompt=f"Write a sympy code snippet from this problem: '{state['problem_statement']}'",
+            schema=Extraction,
+            system_prompt=EXTRACTION_SYSTEM_PROMPT,
+        )
+    except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
+        state["error"] = f"Could not extract the math from this problem: {e}" + REPHRASE_HINT
+        return state
 
     namespace: dict[str, object] = {"sp": sp}
     error: str | None = None
@@ -116,11 +120,22 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
         solution = Solution(steps=[])
         unparsed = ""
         for _ in range(MAX_EXPLANATION_ATTEMPTS):
-            candidate: Solution = llm.generate_structured(
-                prompt=prompt,
-                schema=Solution,
-                system_prompt=EXPLANATION_SYSTEM_PROMPT,
-            )
+            try:
+                candidate: Solution = llm.generate_structured(
+                    prompt=prompt,
+                    schema=Solution,
+                    system_prompt=EXPLANATION_SYSTEM_PROMPT,
+                )
+            except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
+                # Unlike a sympify failure below, this is not "this candidate was
+                # bad" — the LLM itself could not be reached, so retrying with a
+                # different candidate would not help either. End the node now.
+                state["solution"] = []
+                state["solvable"] = False
+                state["error"] = (
+                    f"Could not generate a solution for this problem: {e}" + REPHRASE_HINT
+                )
+                return state
             try:
                 for step in candidate.steps:
                     sp.sympify(step.expression, evaluate=False)  # same parse codegen_node uses

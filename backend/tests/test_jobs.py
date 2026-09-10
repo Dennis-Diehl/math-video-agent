@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import pytest
@@ -21,6 +22,19 @@ class FakeStream:
             raise StopAsyncIteration from None
 
 
+class HangingStream:
+    """Stands in for a container stdout that never produces a line — used to
+    trigger `asyncio.timeout` deterministically instead of actually waiting
+    out `CONTAINER_TIMEOUT_SECONDS`."""
+
+    def __aiter__(self) -> "HangingStream":
+        return self
+
+    async def __anext__(self) -> bytes:
+        await asyncio.sleep(10)
+        raise AssertionError("should have been canceled by the timeout first")
+
+
 class FakeProcess:
     """Stands in for `asyncio.subprocess.Process`: fixed stdout, a fixed exit code."""
 
@@ -29,6 +43,23 @@ class FakeProcess:
         self.returncode = returncode
 
     async def wait(self) -> int:
+        return self.returncode
+
+    def kill(self) -> None:
+        self.returncode = -9
+
+
+class HangingProcess:
+    """Stands in for a container that never prints a terminal line and never
+    exits on its own — only `kill()` ends it, mirroring what `_run` does on
+    `TimeoutError`."""
+
+    def __init__(self) -> None:
+        self.stdout = HangingStream()
+        self.returncode: int | None = None
+
+    async def wait(self) -> int:
+        assert self.returncode is not None, "wait() called before kill()"
         return self.returncode
 
     def kill(self) -> None:
@@ -156,6 +187,33 @@ async def test_run_synthesizes_an_error_when_the_container_produces_no_result(
     assert status is not None
     assert status["status"] == "error"
     assert jobs.get_log("abc")[-1]["node"] is None
+
+
+async def test_run_reports_a_specific_message_when_the_container_times_out(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Never prints a line within the (monkeypatched-short) timeout window.
+    monkeypatch.setattr(jobs, "CONTAINER_TIMEOUT_SECONDS", 0.05)
+    jobs.submit("abc", "Solve x^2 - 4 = 0")
+    process = HangingProcess()
+
+    async def fake_start_container(job_id: str, problem: str) -> HangingProcess:
+        return process
+
+    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
+
+    await jobs._run("abc", "Solve x^2 - 4 = 0")
+
+    status = jobs.get_status("abc")
+    assert status is not None
+    assert status["status"] == "error"
+    detail = status["detail"]
+    assert isinstance(detail, str)
+    assert "longer than" in detail
+    assert "stopped unexpectedly" not in detail
+    # The timeout branch must report once, not fall through to the generic
+    # no-result fallback too.
+    assert len(jobs.get_log("abc")) == 1
 
 
 async def test_get_status_includes_detail_after_an_error(monkeypatch: pytest.MonkeyPatch):

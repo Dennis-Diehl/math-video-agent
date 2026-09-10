@@ -24,9 +24,29 @@ from nodes.solver import solver_node
 from nodes.tts import tts_node
 
 
+def _classified(state: PipelineState) -> str:
+    """Stop the run when the problem could not be classified."""
+    return END if state["error"] else "solver"
+
+
 def _solved(state: PipelineState) -> str:
     """Stop the run when the problem could not be solved."""
     return END if state["error"] else "scene_planner"
+
+
+def _planned(state: PipelineState) -> str:
+    """Stop the run when the scenes could not be planned."""
+    return END if state["error"] else "tts"
+
+
+def _narrated(state: PipelineState) -> str:
+    """Stop the run when narration could not be generated."""
+    return END if state["error"] else "codegen"
+
+
+def _coded(state: PipelineState) -> str:
+    """Stop the run when the scene animation code could not be generated."""
+    return END if state["error"] else "executor"
 
 
 def _rendered(state: PipelineState) -> str:
@@ -47,11 +67,11 @@ def build_pipeline(llm: BaseLLM, cheap_llm: BaseLLM, tts: BaseTTS) -> CompiledSt
     graph.add_node("assembler", assembler_node)
 
     graph.add_edge(START, "classifier")
-    graph.add_edge("classifier", "solver")
+    graph.add_conditional_edges("classifier", _classified, {"solver": "solver", END: END})
     graph.add_conditional_edges("solver", _solved, {"scene_planner": "scene_planner", END: END})
-    graph.add_edge("scene_planner", "tts")
-    graph.add_edge("tts", "codegen")
-    graph.add_edge("codegen", "executor")
+    graph.add_conditional_edges("scene_planner", _planned, {"tts": "tts", END: END})
+    graph.add_conditional_edges("tts", _narrated, {"codegen": "codegen", END: END})
+    graph.add_conditional_edges("codegen", _coded, {"executor": "executor", END: END})
     graph.add_conditional_edges("executor", _rendered, {"assembler": "assembler", END: END})
     graph.add_edge("assembler", END)
 
