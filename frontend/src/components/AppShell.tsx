@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useState } from "react";
+import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 import { ProblemForm } from "./ProblemForm";
 import { JobProgress } from "./JobProgress";
@@ -12,64 +13,30 @@ import { useBackgroundJobWatcher } from "@/hooks/useBackgroundJobWatcher";
 import { useTheme } from "@/hooks/useTheme";
 import { useIsMobile } from "@/hooks/useIsMobile";
 import { getJobStatus, jobVideoUrl } from "@/lib/api";
-import type { HistoryEntry } from "@/types";
 
 export function AppShell() {
   const history = useJobHistory();
   const { theme, toggle } = useTheme();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const isMobile = useIsMobile();
-  // Sidebar's collapsed state is lifted here (rather than kept as Sidebar-local
-  // state) so selecting a history entry or starting a new problem can force it
-  // closed on mobile — see handleSelect/handleNewProblem below. Initialized from
-  // isMobile so a mobile load starts as a collapsed overlay while desktop/tablet
-  // starts as a permanent expanded column, per the spec.
+  // Lifted here (not Sidebar-local) so handleSelect/handleNewProblem can force it
+  // closed on mobile. Starts collapsed on mobile, expanded on desktop/tablet.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(isMobile);
 
-  // useJobHistory's `update` only patches an *existing* entry by jobId — it
-  // never creates one. `useJob`'s onUpdate fires with a brand-new jobId the
-  // very first time (right after submit), so history needs to add it then
-  // and update it on every subsequent call. Upsert here rather than passing
-  // `history.update` straight through, or the newly submitted job's sidebar
-  // entry never appears.
-  const handleJobUpdate = useCallback(
-    (jobId: string, patch: Partial<HistoryEntry>) => {
-      const exists = history.entries.some((e) => e.jobId === jobId);
-      if (exists) {
-        history.update(jobId, patch);
-      } else {
-        // Safe only because of a cross-file invariant: on the add-path, `patch`
-        // always comes from useJob.submit()'s first onUpdate call, which sends a
-        // complete HistoryEntry-shaped patch for a brand-new job; connect()'s
-        // later partial patches (status/video/detail only) always target a jobId
-        // already in history, so they never reach this branch. If useJob changes
-        // what it sends here, this cast stops being sound.
-        history.add({ ...patch, jobId } as HistoryEntry);
-      }
-    },
-    [history],
-  );
+  // history.upsert (not .update) handles both add and patch: useJob's onUpdate
+  // fires with a brand-new jobId on submit, then patches it on every message
+  // after. upsert decides add-vs-update inside setEntries's updater so it can't
+  // race two back-to-back calls into a duplicate entry (see useJobHistory).
+  const job = useJob({ onUpdate: history.upsert });
 
-  const job = useJob({ onUpdate: handleJobUpdate });
-
-  // Tracks which jobId the `job` hook currently owns live state for (i.e. it
-  // was reached via submit()/resume(), so its websocket is — or was — the
-  // authoritative source). `job.jobId` itself is unsuitable for this check:
-  // useJob (Task 6) never clears it on disconnect(), so it stays set to the
-  // last submitted/resumed id forever. Without a separately-owned flag,
-  // reopening that same job id later (e.g. after the server has already
-  // reported it "done") would still read `job.status`/`job.video` — stale
-  // hook state nobody ever updated — instead of the freshly reconciled
-  // history entry.
+  // Tracks which jobId `job` has live WS state for — `job.jobId` alone can't tell
+  // (useJob never clears it on disconnect, so it just holds the last id forever).
   const [liveJobId, setLiveJobId] = useState<string | null>(null);
-  // Surfaced when `job.submit` rejects (e.g. the backend is unreachable) —
-  // without this, a failed fetch is an unhandled promise rejection: no
-  // crash, but no feedback either, and the form silently does nothing.
+  // Surfaces a rejected job.submit (e.g. backend unreachable) instead of leaving
+  // an unhandled promise rejection with no user feedback.
   const [submitError, setSubmitError] = useState<string | null>(null);
-  // Prevents a second click during the await window between clicking "Send"
-  // and job.submit(problem) resolving — without this, a double-submit calls
-  // job.submit() again, tearing down the first job's live connection mid-flight
-  // (useJob.connect() closes the previous socket).
+  // Blocks a second click during the submit await — otherwise a double-submit
+  // tears down the first job's live socket mid-flight (useJob.connect() closes it).
   const [submitting, setSubmitting] = useState(false);
 
   useBackgroundJobWatcher({
@@ -99,6 +66,18 @@ export function AppShell() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function handleDelete(jobId: string) {
+    // Deleting the active entry would otherwise leave activeJobId pointing at a
+    // removed entry, rendering the "job selected" pane with stale/undefined state.
+    // Mirror handleNewProblem's cleanup to fall back to the empty-state form.
+    if (jobId === activeJobId) {
+      job.disconnect();
+      setLiveJobId(null);
+      setActiveJobId(null);
+    }
+    history.remove(jobId);
   }
 
   async function handleSelect(jobId: string) {
@@ -134,34 +113,45 @@ export function AppShell() {
   const detail = isLive ? job.detail : activeEntry?.detail;
 
   return (
-    <div className="flex h-screen">
-      <Sidebar
-        entries={history.entries}
-        activeJobId={activeJobId}
-        onNewProblem={handleNewProblem}
-        onSelect={handleSelect}
-        theme={theme}
-        onToggleTheme={toggle}
-        collapsed={sidebarCollapsed}
-        onCollapsedChange={setSidebarCollapsed}
-      />
-      <main className="flex flex-1 flex-col gap-4 p-4">
-        {!activeJobId ? (
-          <>
-            {submitError && <ErrorMessage detail={submitError} />}
-            <ProblemForm onSubmit={handleSubmit} disabled={submitting} />
-          </>
-        ) : (
-          <>
-            <p className="font-medium">{activeEntry?.problem ?? job.jobId}</p>
-            {status && status !== "done" && status !== "error" && <JobProgress progress={progress} />}
-            {status === "error" && detail && <ErrorMessage detail={detail} />}
-            {status === "done" && video && (
-              <VideoPlayer src={video.startsWith("http") ? video : jobVideoUrl(activeJobId)} />
-            )}
-          </>
-        )}
-      </main>
+    <div className="flex h-screen flex-col">
+      <Header theme={theme} onToggleTheme={toggle} />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar
+          entries={history.entries}
+          activeJobId={activeJobId}
+          onNewProblem={handleNewProblem}
+          onSelect={handleSelect}
+          onDelete={handleDelete}
+          collapsed={sidebarCollapsed}
+          onCollapsedChange={setSidebarCollapsed}
+        />
+        <main className="flex flex-1 flex-col overflow-auto p-4">
+          {!activeJobId ? (
+            <div className="flex flex-1 flex-col items-center justify-center">
+              <div className="w-full max-w-xl">
+                <h1 className="mb-4 text-center text-xl font-semibold">What should I solve?</h1>
+                {submitError && (
+                  <div className="mb-4">
+                    <ErrorMessage detail={submitError} />
+                  </div>
+                )}
+                <ProblemForm onSubmit={handleSubmit} disabled={submitting} />
+              </div>
+            </div>
+          ) : (
+            <div className="mx-auto flex w-full max-w-xl flex-col gap-4">
+              <div className="bubble-system rounded-xl border border-[var(--border)] px-4 py-3 text-sm shadow-sm">
+                {activeEntry?.problem ?? job.jobId}
+              </div>
+              {status && status !== "done" && status !== "error" && <JobProgress progress={progress} />}
+              {status === "error" && detail && <ErrorMessage detail={detail} />}
+              {status === "done" && video && (
+                <VideoPlayer src={video.startsWith("http") ? video : jobVideoUrl(activeJobId)} />
+              )}
+            </div>
+          )}
+        </main>
+      </div>
     </div>
   );
 }

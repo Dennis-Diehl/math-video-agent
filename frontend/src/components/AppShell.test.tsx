@@ -92,4 +92,25 @@ describe("AppShell", () => {
     // activeJobId must never have been set from a rejected submit().
     expect(screen.getByLabelText(/problem/i)).toBeInTheDocument();
   });
+
+  it("shows a heading above the form before any problem is submitted", () => {
+    render(<AppShell />);
+
+    expect(screen.getByText(/what should i solve/i)).toBeInTheDocument();
+  });
+
+  it("deleting the active entry returns to the empty form instead of a broken active view", async () => {
+    vi.spyOn(api, "createJob").mockResolvedValue({ job_id: "abc", queue_position: 1 });
+    render(<AppShell />);
+    await userEvent.type(screen.getByLabelText(/problem/i), "Solve x^2 - 4 = 0");
+    await userEvent.click(screen.getByRole("button", { name: /send/i }));
+
+    // Sanity check: the submitted problem is now the active view, not the form.
+    expect(screen.queryByLabelText(/problem/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /delete solve x\^2 - 4 = 0/i }));
+
+    expect(screen.getByLabelText(/problem/i)).toHaveValue("");
+    expect(screen.queryByTestId("history-entry-abc")).not.toBeInTheDocument();
+  });
 });

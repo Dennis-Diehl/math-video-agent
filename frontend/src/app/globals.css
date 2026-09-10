@@ -8,7 +8,7 @@
   --fg-muted: #94a3b8;
   --accent: #d97706;
   --accent-fg: #0f172a;
-  --border: #1e293b;
+  --border: #334155;
   --bubble-user-bg: #1e3a5f;
   --bubble-system-bg: #1e293b;
   --error-bg: #3f1d1d;
@@ -63,4 +63,19 @@ body {
 
 .text-muted {
   color: var(--fg-muted);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 300ms ease-out;
 }

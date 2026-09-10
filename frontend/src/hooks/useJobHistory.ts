@@ -32,6 +32,25 @@ export function useJobHistory() {
     setEntries((prev) => prev.map((e) => (e.jobId === jobId ? { ...e, ...patch } : e)));
   }, []);
 
+  // Decides add-vs-update inside the setEntries updater (not from closed-over
+  // `entries`) so two back-to-back calls for the same new jobId — e.g. submit()'s
+  // synchronous onUpdate then the websocket's first message — can't both see
+  // "not present" and add a duplicate entry.
+  const upsert = useCallback((jobId: string, patch: Partial<HistoryEntry>) => {
+    setEntries((prev) => {
+      const exists = prev.some((e) => e.jobId === jobId);
+      if (exists) {
+        return prev.map((e) => (e.jobId === jobId ? { ...e, ...patch } : e));
+      }
+      // Add-path patches should always be a full HistoryEntry from useJob.submit()'s
+      // first onUpdate; this guard flags a partial patch reaching here instead.
+      if (process.env.NODE_ENV !== "production" && (!("problem" in patch) || !("submittedAt" in patch))) {
+        console.error(`upsert: adding jobId ${jobId} without a full patch — this will produce a malformed entry`);
+      }
+      return [{ ...patch, jobId } as HistoryEntry, ...prev];
+    });
+  }, []);
+
   const remove = useCallback((jobId: string) => {
     setEntries((prev) => prev.filter((e) => e.jobId !== jobId));
   }, []);
@@ -42,5 +61,5 @@ export function useJobHistory() {
     setEntries((prev) => prev.map((e) => (e.jobId === jobId ? { ...e, unread: false } : e)));
   }, []);
 
-  return { entries, add, update, remove, clear, markRead };
+  return { entries, add, update, remove, clear, markRead, upsert };
 }

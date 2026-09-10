@@ -5,9 +5,7 @@ import { createJob, jobWsUrl } from "@/lib/api";
 import type { HistoryEntry, JobStatus, ProgressLine } from "@/types";
 
 interface UseJobOptions {
-  /** Called with the job id and a patch every time this job's state changes,
-   * so a caller (the history hook) can persist it without this hook knowing
-   * about localStorage. */
+  /** Fires on every state change so a caller (the history hook) can persist it without this hook knowing about localStorage. */
   onUpdate?: (jobId: string, patch: Partial<HistoryEntry>) => void;
 }
 
