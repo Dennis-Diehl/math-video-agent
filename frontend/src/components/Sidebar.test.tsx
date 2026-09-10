@@ -111,10 +111,13 @@ describe("Sidebar", () => {
 
     render(<ControlledSidebar />);
 
-    expect(screen.queryByText(/history/i)).not.toBeInTheDocument();
+    // The history section stays mounted (so the width/opacity transition has something to
+    // animate), but it's hidden from assistive tech and visually faded while collapsed.
+    expect(screen.getByTestId("sidebar-history-section")).toHaveAttribute("aria-hidden", "true");
 
     await userEvent.click(screen.getByRole("button", { name: /expand sidebar/i }));
 
+    expect(screen.getByTestId("sidebar-history-section")).toHaveAttribute("aria-hidden", "false");
     expect(screen.getByText(/history/i)).toBeInTheDocument();
   });
 
@@ -152,6 +155,64 @@ describe("Sidebar", () => {
 
     const panel = screen.getByText(/history/i).closest("div.panel");
     expect(panel).toHaveClass("fixed", "inset-y-0", "left-0", "z-50", "md:static", "md:z-auto");
+  });
+
+  it("renders the collapsed panel in-flow (no fixed overlay) so it doesn't clip mobile content", () => {
+    render(
+      <Sidebar
+        entries={[]}
+        activeJobId={null}
+        onNewProblem={vi.fn()}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        collapsed={true}
+        onCollapsedChange={vi.fn()}
+      />,
+    );
+
+    const panel = screen.getByRole("button", { name: /expand sidebar/i }).closest("div.panel");
+    expect(panel).not.toHaveClass("fixed", "inset-y-0", "left-0", "z-50");
+    expect(panel).toHaveClass("md:static", "md:z-auto");
+    // Width is now Framer Motion-driven (an `animate={{ width }}` prop, not a
+    // `w-12`/`w-60` Tailwind class), so there's no width class left to assert.
+    // Framer Motion (this version) drives it through a WAAPI-backed animation
+    // rather than a plain inline `style` attribute, and jsdom doesn't surface
+    // that at all (no `style` attribute appears on the node), so the resolved
+    // pixel width isn't observable here either — verified visually instead
+    // (see report). What's left to assert is that the width class is gone.
+    expect(panel?.className).not.toMatch(/\bw-(12|60)\b/);
+  });
+
+  it("makes the history section inert (not just aria-hidden) while collapsed, so it can't be tabbed into", async () => {
+    function ControlledSidebar() {
+      const [collapsed, setCollapsed] = useState(true);
+      return (
+        <Sidebar
+          entries={[makeEntry()]}
+          activeJobId={null}
+          onNewProblem={vi.fn()}
+          onSelect={vi.fn()}
+          onDelete={vi.fn()}
+          collapsed={collapsed}
+          onCollapsedChange={setCollapsed}
+        />
+      );
+    }
+
+    render(<ControlledSidebar />);
+
+    // `aria-hidden` alone does not remove elements from the tab order — only
+    // the native `inert` attribute does. jsdom (this project's version) doesn't
+    // honor `inert` in its tab-order emulation, and doesn't reflect it as a
+    // `.inert` DOM property either (`historySection.inert` reads back
+    // `undefined` even with the attribute present) — so this asserts the
+    // attribute directly rather than simulating Tab or reading the property.
+    const historySection = screen.getByTestId("sidebar-history-section");
+    expect(historySection).toHaveAttribute("inert");
+
+    await userEvent.click(screen.getByRole("button", { name: /expand sidebar/i }));
+
+    expect(screen.getByTestId("sidebar-history-section")).not.toHaveAttribute("inert");
   });
 
   it("renders a backdrop when expanded that closes the sidebar on click", async () => {
@@ -192,6 +253,34 @@ describe("Sidebar", () => {
     expect(screen.queryByTestId("sidebar-backdrop")).not.toBeInTheDocument();
   });
 
+  it("animates collapse/expand via Framer Motion (width + icon rotation), not CSS transitions", () => {
+    render(
+      <Sidebar
+        entries={[]}
+        activeJobId={null}
+        onNewProblem={vi.fn()}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        collapsed={false}
+        onCollapsedChange={vi.fn()}
+      />,
+    );
+
+    // Width and icon rotation are now driven by Framer Motion's `animate`
+    // prop (see Sidebar.tsx), not the old `transition-[width]` / `rotate-180`
+    // CSS classes, so there's no such class left to assert — and (per the
+    // prior test's comment) the resolved animated value isn't observable
+    // through jsdom either, since this Framer Motion version animates via
+    // WAAPI rather than a plain inline `style` attribute. What's left to
+    // assert structurally is that the old CSS-transition classes are gone.
+    const panel = screen.getByText(/history/i).closest("div.panel");
+    expect(panel?.className).not.toContain("transition-[width]");
+
+    const toggleButton = screen.getByRole("button", { name: /collapse sidebar/i });
+    expect(toggleButton.className).not.toContain("transition-transform");
+    expect(toggleButton.className).not.toContain("rotate-180");
+  });
+
   it("gives each history entry a visible border", () => {
     render(
       <Sidebar entries={[makeEntry()]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
@@ -208,6 +297,42 @@ describe("Sidebar", () => {
     const entry = screen.getByTestId("history-entry-abc");
     expect(entry).toHaveClass("hover:border-[var(--fg-muted)]");
     expect(entry.className).not.toContain("hover:border-[var(--accent)]");
+  });
+
+  it("gives a hovered history entry a visible background tint, not just a border change", () => {
+    render(
+      <Sidebar entries={[makeEntry()]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
+    );
+
+    const entry = screen.getByTestId("history-entry-abc");
+    expect(entry).toHaveClass("hover:bg-[var(--fg-muted)]/10");
+    expect(entry).toHaveClass("transition-colors");
+  });
+
+  it("brightens a hovered history entry so it reads as brighter in both light and dark theme", () => {
+    render(
+      <Sidebar entries={[makeEntry()]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
+    );
+
+    const entry = screen.getByTestId("history-entry-abc");
+    expect(entry).toHaveClass("hover:brightness-110");
+  });
+
+  it("gives the sidebar collapse/expand toggle a bounded hover background, not a formless hover", () => {
+    render(
+      <Sidebar entries={[]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
+    );
+
+    const toggleButton = screen.getByRole("button", { name: /collapse sidebar/i });
+    expect(toggleButton).toHaveClass("hover:bg-[var(--bg)]");
+    expect(toggleButton).toHaveClass("rounded-full");
+    expect(toggleButton.className).toContain("transition-colors");
+  });
+
+  it("brightens the new-problem button on hover, consistent with other primary buttons", () => {
+    render(<Sidebar entries={[]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /new problem/i })).toHaveClass("hover:brightness-110");
   });
 
   it("calls onDelete with the job id when the delete button is clicked", async () => {

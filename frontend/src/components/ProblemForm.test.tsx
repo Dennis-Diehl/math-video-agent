@@ -28,4 +28,12 @@ describe("ProblemForm", () => {
 
     expect(screen.getByLabelText(/problem/i)).toBeDisabled();
   });
+
+  it("brightens the send button on hover, consistent with other primary buttons", () => {
+    render(<ProblemForm onSubmit={vi.fn()} />);
+
+    const sendButton = screen.getByRole("button", { name: /send/i });
+    expect(sendButton).toHaveClass("hover:brightness-110");
+    expect(sendButton.className).toContain("transition-[filter]");
+  });
 });
