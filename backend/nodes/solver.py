@@ -2,7 +2,7 @@
 
 import sympy as sp
 
-from config.llm.base import BaseLLM
+from config.llm.base import BaseLLM, LLMUnavailableError
 from config.schemas import Extraction, Solution
 from graph.pipeline_state import PipelineState
 
@@ -95,6 +95,9 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
             schema=Extraction,
             system_prompt=EXTRACTION_SYSTEM_PROMPT,
         )
+    except LLMUnavailableError as e:
+        state["error"] = f"Could not reach the AI service: {e}"
+        return state
     except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
         state["error"] = f"Could not extract the math from this problem: {e}" + REPHRASE_HINT
         return state
@@ -126,10 +129,15 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
                     schema=Solution,
                     system_prompt=EXPLANATION_SYSTEM_PROMPT,
                 )
-            except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
+            except LLMUnavailableError as e:
                 # Unlike a sympify failure below, this is not "this candidate was
                 # bad" — the LLM itself could not be reached, so retrying with a
                 # different candidate would not help either. End the node now.
+                state["solution"] = []
+                state["solvable"] = False
+                state["error"] = f"Could not reach the AI service: {e}"
+                return state
+            except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
                 state["solution"] = []
                 state["solvable"] = False
                 state["error"] = (

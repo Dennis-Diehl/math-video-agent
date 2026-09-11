@@ -1,4 +1,4 @@
-from config.llm.base import BaseLLM, T
+from config.llm.base import BaseLLM, LLMUnavailableError, T
 from config.schemas import Classification
 from graph.pipeline_state import PipelineState
 from nodes.classifier import classifier_node
@@ -74,6 +74,16 @@ def test_classifier_error_tells_the_user_how_to_rephrase():
 
     assert state["error"] is not None
     assert "more explicitly" in state["error"]
+
+
+def test_classifier_reports_an_api_error_without_the_rephrase_hint():
+    llm = FakeLLM(raises=LLMUnavailableError("429 RESOURCE_EXHAUSTED"))
+
+    state = classifier_node(make_state("solve x^2 - 4 = 0"), llm)
+
+    assert state["error"] is not None
+    assert "Could not reach the AI service" in state["error"]
+    assert "more explicitly" not in state["error"]
 
 
 def test_classifier_clears_an_error_from_an_earlier_run():

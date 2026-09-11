@@ -1,4 +1,4 @@
-from config.llm.base import BaseLLM, T
+from config.llm.base import BaseLLM, LLMUnavailableError, T
 from config.schemas import Extraction, Solution, Step
 from graph.pipeline_state import PipelineState
 from nodes.solver import MAX_EXPLANATION_ATTEMPTS, solver_node
@@ -11,7 +11,9 @@ class FakeLLM(BaseLLM):
     then repeatedly for `Solution`. The schema decides which canned answer to
     hand back, so a test only has to state the two it cares about. `fails_on`
     raises instead of answering, for the schema named, to simulate that call's
-    LLM request failing outright.
+    LLM request failing outright — `fails_with` picks which exception, so a
+    test can simulate either a generic LLM failure or the service itself
+    being unreachable.
     """
 
     def __init__(
@@ -19,10 +21,12 @@ class FakeLLM(BaseLLM):
         sympy_code: str,
         steps: list[Step] | None = None,
         fails_on: str | None = None,
+        fails_with: Exception | None = None,
     ):
         self.sympy_code = sympy_code
         self.steps = steps if steps is not None else [Step(explanation="Start.", expression="x")]
         self.fails_on = fails_on
+        self.fails_with = fails_with or ValueError("Gemini returned no text")
         self.prompts: list[str] = []
 
     def generate(self, prompt: str, system_prompt: str | None = None) -> str:
@@ -33,7 +37,7 @@ class FakeLLM(BaseLLM):
     ) -> T:
         self.prompts.append(prompt)
         if schema.__name__ == self.fails_on:
-            raise ValueError("Gemini returned no text")
+            raise self.fails_with
         if schema is Extraction:
             return schema.model_validate(Extraction(sympy_code=self.sympy_code).model_dump())
         return schema.model_validate(Solution(steps=self.steps).model_dump())
@@ -150,3 +154,34 @@ def test_solver_reports_the_error_when_the_candidate_generation_call_fails():
     # The LLM call itself failing is not "this candidate was bad" — it ends
     # the node immediately rather than retrying with a different candidate.
     assert len(llm.prompts) == 2
+
+
+def test_solver_reports_an_api_error_on_extraction_without_the_rephrase_hint():
+    llm = FakeLLM(
+        sympy_code="result = sp.Integer(2)",
+        fails_on="Extraction",
+        fails_with=LLMUnavailableError("429 RESOURCE_EXHAUSTED"),
+    )
+
+    state = solver_node(make_state("Solve x = 2"), llm)
+
+    assert state["solvable"] is False
+    assert state["error"] is not None
+    assert "Could not reach the AI service" in state["error"]
+    assert "more explicitly" not in state["error"]
+
+
+def test_solver_reports_an_api_error_on_candidate_generation_without_the_rephrase_hint():
+    llm = FakeLLM(
+        sympy_code="result = sp.Integer(2)",
+        fails_on="Solution",
+        fails_with=LLMUnavailableError("429 RESOURCE_EXHAUSTED"),
+    )
+
+    state = solver_node(make_state("Solve x = 2"), llm)
+
+    assert state["solvable"] is False
+    assert state["solution"] == []
+    assert state["error"] is not None
+    assert "Could not reach the AI service" in state["error"]
+    assert "more explicitly" not in state["error"]

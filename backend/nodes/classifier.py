@@ -1,6 +1,6 @@
 """classifier_node — read a math problem's topic, difficulty and wording."""
 
-from config.llm.base import BaseLLM
+from config.llm.base import BaseLLM, LLMUnavailableError
 from config.schemas import Classification
 from graph.pipeline_state import PipelineState
 from nodes.solver import REPHRASE_HINT
@@ -32,6 +32,11 @@ def classifier_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
         classification: Classification = llm.generate_structured(
             prompt, schema=Classification, system_prompt=CLASSIFIER_SYSTEM_PROMPT
         )
+    except LLMUnavailableError as e:
+        # Rephrasing the problem would not help here — the service itself
+        # refused or could not be reached, not the wording.
+        state["error"] = f"Could not reach the AI service: {e}"
+        return state
     except Exception as e:  # noqa: BLE001 — the LLM call can raise any exception type
         state["error"] = f"Could not understand this as a math problem: {e}" + REPHRASE_HINT
         return state

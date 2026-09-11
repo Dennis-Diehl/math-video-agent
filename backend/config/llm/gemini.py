@@ -2,8 +2,9 @@
 
 from google import genai
 from google.genai import types
+from google.genai.errors import APIError
 
-from config.llm.base import BaseLLM, T
+from config.llm.base import BaseLLM, LLMUnavailableError, T
 
 
 class GeminiLLM(BaseLLM):
@@ -16,9 +17,12 @@ class GeminiLLM(BaseLLM):
 
     def generate(self, prompt: str, system_prompt: str | None = None) -> str:
         config = types.GenerateContentConfig(system_instruction=system_prompt)
-        response = self.client.models.generate_content(
-            model=self.model_name, contents=prompt, config=config
-        )
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name, contents=prompt, config=config
+            )
+        except APIError as e:
+            raise LLMUnavailableError(str(e)) from e
 
         if response.text is None:
             raise ValueError("Gemini returned no text")
@@ -33,11 +37,14 @@ class GeminiLLM(BaseLLM):
             response_schema=schema,
             system_instruction=system_prompt,
         )
-        response = self.client.models.generate_content(
-            model=self.model_name,
-            contents=prompt,
-            config=config,
-        )
+        try:
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=config,
+            )
+        except APIError as e:
+            raise LLMUnavailableError(str(e)) from e
 
         if not isinstance(response.parsed, schema):
             raise TypeError(f"Gemini did not return a valid {schema.__name__}")

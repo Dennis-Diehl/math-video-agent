@@ -8,6 +8,15 @@ from pydantic import BaseModel
 T = TypeVar("T", bound=BaseModel)
 
 
+class LLMUnavailableError(Exception):
+    """Raised when the LLM service itself could not be reached or refused the
+    request — rate limit, quota, auth, network — as opposed to the model
+    producing a response that is unusable. Callers use this distinction to
+    avoid telling a user to rephrase their problem when rephrasing would not
+    help.
+    """
+
+
 class BaseLLM(ABC):
     """Abstract base class for all LLM providers."""
 

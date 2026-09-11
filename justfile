@@ -65,12 +65,16 @@ check: backend-check frontend-check
 
 # --- Docker (full stack) ---
 
+# Build the per-job sandbox image the API spawns for each submitted problem
+sandbox-build:
+    docker build -f backend/Dockerfile.sandbox -t math-video-agent-sandbox:latest backend
+
 # Build and start api + frontend via docker compose (foreground, Ctrl-C to stop)
-up:
+up: sandbox-build
     docker compose up --build
 
 # Start api + frontend in the background
-up-d:
+up-d: sandbox-build
     docker compose up --build -d
 
 # Stop and remove the docker compose stack
