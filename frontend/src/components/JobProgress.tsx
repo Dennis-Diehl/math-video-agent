@@ -1,5 +1,6 @@
-import { motion } from "framer-motion";
-import { CheckCircle2 } from "lucide-react";
+import Stepper from "@mui/material/Stepper";
+import Step from "@mui/material/Step";
+import StepLabel from "@mui/material/StepLabel";
 import type { ProgressLine } from "@/types";
 
 const NODE_DESCRIPTIONS: Record<string, string> = {
@@ -17,24 +18,16 @@ interface JobProgressProps {
 }
 
 export function JobProgress({ progress }: JobProgressProps) {
+  const activeStep = progress.length - 1;
   return (
-    <ul className="flex flex-col gap-1 text-sm">
-      {/* No AnimatePresence here: steps are only ever appended, never removed
-          or reordered (progress is a strictly-growing list from the backend),
-          so there's no exit to animate — AnimatePresence exists to animate
-          unmounts, which never happen in this list. */}
-      {progress.map((line) => (
-        <motion.li
-          key={line.node}
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="flex items-center gap-2"
-        >
-          <CheckCircle2 size={14} aria-hidden className="text-muted shrink-0" />
-          <span>{(line.node && NODE_DESCRIPTIONS[line.node]) || line.node}</span>
-        </motion.li>
+    <Stepper activeStep={activeStep} orientation="vertical">
+      {progress.map((line, index) => (
+        <Step key={`${line.node}-${index}`} completed={line.status === "done"}>
+          <StepLabel error={line.status === "error"}>
+            {(line.node && NODE_DESCRIPTIONS[line.node]) || line.node}
+          </StepLabel>
+        </Step>
       ))}
-    </ul>
+    </Stepper>
   );
 }

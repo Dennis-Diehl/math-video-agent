@@ -12,8 +12,6 @@ describe("JobProgress", () => {
 
     render(<JobProgress progress={progress} />);
 
-    const items = screen.getAllByRole("listitem");
-    expect(items).toHaveLength(2);
     expect(screen.getByText("Identifying the topic and difficulty")).toBeInTheDocument();
     expect(screen.getByText("Solving the problem step by step")).toBeInTheDocument();
     expect(screen.queryByText("classifier")).not.toBeInTheDocument();
@@ -23,7 +21,7 @@ describe("JobProgress", () => {
   it("renders nothing extra when progress is empty", () => {
     render(<JobProgress progress={[]} />);
 
-    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    expect(screen.queryByText(/./)).not.toBeInTheDocument();
   });
 
   it("falls back to the raw node name for an unknown node, without crashing", () => {
@@ -34,5 +32,17 @@ describe("JobProgress", () => {
     render(<JobProgress progress={progress} />);
 
     expect(screen.getByText("some_future_node")).toBeInTheDocument();
+  });
+
+  it("shows an error node's step as errored", () => {
+    const progress: ProgressLine[] = [
+      { node: "classifier", status: "done", detail: null, video: null },
+      { node: "solver", status: "error", detail: "sympy could not solve this.", video: null },
+    ];
+
+    render(<JobProgress progress={progress} />);
+
+    const errorLabel = screen.getByText("Solving the problem step by step");
+    expect(errorLabel.closest(".Mui-error")).not.toBeNull();
   });
 });

@@ -93,6 +93,14 @@ describe("Sidebar", () => {
     expect(screen.getByTestId("history-entry-abc")).toHaveAttribute("data-unread", "true");
   });
 
+  it("marks the active entry as selected", () => {
+    render(
+      <Sidebar entries={[makeEntry()]} activeJobId="abc" onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
+    );
+
+    expect(screen.getByTestId("history-entry-abc")).toHaveClass("Mui-selected");
+  });
+
   it("collapses to icon-only when collapsed is true, expands on toggle", async () => {
     function ControlledSidebar() {
       const [collapsed, setCollapsed] = useState(true);
@@ -140,47 +148,62 @@ describe("Sidebar", () => {
     expect(onCollapsedChange).toHaveBeenCalledWith(true);
   });
 
-  it("renders the expanded panel as a fixed overlay on mobile and static on desktop", () => {
+  it("renders as a permanent (in-flow) drawer on desktop", () => {
     render(
       <Sidebar
-        entries={[]}
+        entries={[makeEntry()]}
+        activeJobId={null}
+        onNewProblem={vi.fn()}
+        onSelect={vi.fn()}
+        onDelete={vi.fn()}
+        mobile={false}
+      />,
+    );
+
+    // A permanent Drawer renders its content directly in flow, not inside a
+    // Modal/portal, and is always present regardless of open/close state.
+    expect(screen.getByText("Solve x^2 - 4 = 0")).toBeInTheDocument();
+  });
+
+  it("renders as a temporary overlay drawer on mobile that closes on backdrop click", async () => {
+    const onCollapsedChange = vi.fn();
+    render(
+      <Sidebar
+        entries={[makeEntry()]}
         activeJobId={null}
         onNewProblem={vi.fn()}
         onSelect={vi.fn()}
         onDelete={vi.fn()}
         collapsed={false}
-        onCollapsedChange={vi.fn()}
+        onCollapsedChange={onCollapsedChange}
+        mobile
       />,
     );
 
-    const panel = screen.getByText(/history/i).closest("div.panel");
-    expect(panel).toHaveClass("fixed", "inset-y-0", "left-0", "z-50", "md:static", "md:z-auto");
+    expect(screen.getByText("Solve x^2 - 4 = 0")).toBeInTheDocument();
+
+    const backdrop = document.querySelector(".MuiBackdrop-root");
+    expect(backdrop).not.toBeNull();
+    await userEvent.click(backdrop as Element);
+
+    expect(onCollapsedChange).toHaveBeenCalledWith(true);
   });
 
-  it("renders the collapsed panel in-flow (no fixed overlay) so it doesn't clip mobile content", () => {
+  it("does not render its content when the mobile drawer is collapsed (closed)", () => {
     render(
       <Sidebar
-        entries={[]}
+        entries={[makeEntry()]}
         activeJobId={null}
         onNewProblem={vi.fn()}
         onSelect={vi.fn()}
         onDelete={vi.fn()}
         collapsed={true}
         onCollapsedChange={vi.fn()}
+        mobile
       />,
     );
 
-    const panel = screen.getByRole("button", { name: /expand sidebar/i }).closest("div.panel");
-    expect(panel).not.toHaveClass("fixed", "inset-y-0", "left-0", "z-50");
-    expect(panel).toHaveClass("md:static", "md:z-auto");
-    // Width is now Framer Motion-driven (an `animate={{ width }}` prop, not a
-    // `w-12`/`w-60` Tailwind class), so there's no width class left to assert.
-    // Framer Motion (this version) drives it through a WAAPI-backed animation
-    // rather than a plain inline `style` attribute, and jsdom doesn't surface
-    // that at all (no `style` attribute appears on the node), so the resolved
-    // pixel width isn't observable here either — verified visually instead
-    // (see report). What's left to assert is that the width class is gone.
-    expect(panel?.className).not.toMatch(/\bw-(12|60)\b/);
+    expect(screen.queryByText("Solve x^2 - 4 = 0")).not.toBeInTheDocument();
   });
 
   it("makes the history section inert (not just aria-hidden) while collapsed, so it can't be tabbed into", async () => {
@@ -213,126 +236,6 @@ describe("Sidebar", () => {
     await userEvent.click(screen.getByRole("button", { name: /expand sidebar/i }));
 
     expect(screen.getByTestId("sidebar-history-section")).not.toHaveAttribute("inert");
-  });
-
-  it("renders a backdrop when expanded that closes the sidebar on click", async () => {
-    const onCollapsedChange = vi.fn();
-    render(
-      <Sidebar
-        entries={[]}
-        activeJobId={null}
-        onNewProblem={vi.fn()}
-        onSelect={vi.fn()}
-        onDelete={vi.fn()}
-        collapsed={false}
-        onCollapsedChange={onCollapsedChange}
-      />,
-    );
-
-    const backdrop = screen.getByTestId("sidebar-backdrop");
-    expect(backdrop).toHaveClass("fixed", "inset-0", "z-40", "md:hidden");
-
-    await userEvent.click(backdrop);
-
-    expect(onCollapsedChange).toHaveBeenCalledWith(true);
-  });
-
-  it("does not render a backdrop when collapsed", () => {
-    render(
-      <Sidebar
-        entries={[]}
-        activeJobId={null}
-        onNewProblem={vi.fn()}
-        onSelect={vi.fn()}
-        onDelete={vi.fn()}
-        collapsed={true}
-        onCollapsedChange={vi.fn()}
-      />,
-    );
-
-    expect(screen.queryByTestId("sidebar-backdrop")).not.toBeInTheDocument();
-  });
-
-  it("animates collapse/expand via Framer Motion (width + icon rotation), not CSS transitions", () => {
-    render(
-      <Sidebar
-        entries={[]}
-        activeJobId={null}
-        onNewProblem={vi.fn()}
-        onSelect={vi.fn()}
-        onDelete={vi.fn()}
-        collapsed={false}
-        onCollapsedChange={vi.fn()}
-      />,
-    );
-
-    // Width and icon rotation are now driven by Framer Motion's `animate`
-    // prop (see Sidebar.tsx), not the old `transition-[width]` / `rotate-180`
-    // CSS classes, so there's no such class left to assert — and (per the
-    // prior test's comment) the resolved animated value isn't observable
-    // through jsdom either, since this Framer Motion version animates via
-    // WAAPI rather than a plain inline `style` attribute. What's left to
-    // assert structurally is that the old CSS-transition classes are gone.
-    const panel = screen.getByText(/history/i).closest("div.panel");
-    expect(panel?.className).not.toContain("transition-[width]");
-
-    const toggleButton = screen.getByRole("button", { name: /collapse sidebar/i });
-    expect(toggleButton.className).not.toContain("transition-transform");
-    expect(toggleButton.className).not.toContain("rotate-180");
-  });
-
-  it("gives each history entry a visible border", () => {
-    render(
-      <Sidebar entries={[makeEntry()]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
-    );
-
-    expect(screen.getByTestId("history-entry-abc")).toHaveClass("border", "border-[var(--border)]");
-  });
-
-  it("hovers a non-active entry with a muted border, not the accent color", () => {
-    render(
-      <Sidebar entries={[makeEntry()]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
-    );
-
-    const entry = screen.getByTestId("history-entry-abc");
-    expect(entry).toHaveClass("hover:border-[var(--fg-muted)]");
-    expect(entry.className).not.toContain("hover:border-[var(--accent)]");
-  });
-
-  it("gives a hovered history entry a visible background tint, not just a border change", () => {
-    render(
-      <Sidebar entries={[makeEntry()]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
-    );
-
-    const entry = screen.getByTestId("history-entry-abc");
-    expect(entry).toHaveClass("hover:bg-[var(--fg-muted)]/10");
-    expect(entry).toHaveClass("transition-colors");
-  });
-
-  it("brightens a hovered history entry so it reads as brighter in both light and dark theme", () => {
-    render(
-      <Sidebar entries={[makeEntry()]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
-    );
-
-    const entry = screen.getByTestId("history-entry-abc");
-    expect(entry).toHaveClass("hover:brightness-110");
-  });
-
-  it("gives the sidebar collapse/expand toggle a bounded hover background, not a formless hover", () => {
-    render(
-      <Sidebar entries={[]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />,
-    );
-
-    const toggleButton = screen.getByRole("button", { name: /collapse sidebar/i });
-    expect(toggleButton).toHaveClass("hover:bg-[var(--bg)]");
-    expect(toggleButton).toHaveClass("rounded-full");
-    expect(toggleButton.className).toContain("transition-colors");
-  });
-
-  it("brightens the new-problem button on hover, consistent with other primary buttons", () => {
-    render(<Sidebar entries={[]} activeJobId={null} onNewProblem={vi.fn()} onSelect={vi.fn()} onDelete={vi.fn()} />);
-
-    expect(screen.getByRole("button", { name: /new problem/i })).toHaveClass("hover:brightness-110");
   });
 
   it("calls onDelete with the job id when the delete button is clicked", async () => {
@@ -371,19 +274,5 @@ describe("Sidebar", () => {
     expect(deleteButtons).toHaveLength(2);
     expect(deleteButtons[0]).toHaveAccessibleName(deleteButtons[0].getAttribute("aria-label")!);
     expect(deleteButtons[0].getAttribute("aria-label")).not.toBe(deleteButtons[1].getAttribute("aria-label"));
-  });
-
-  it("keeps the delete button always visible on mobile and hover/focus-gated at md and above", () => {
-    renderSidebar();
-
-    const deleteButton = screen.getByRole("button", { name: /delete solve x\^2 - 4 = 0/i });
-
-    expect(deleteButton.className).toContain("opacity-100");
-    expect(deleteButton.className).toContain("md:opacity-0");
-    expect(deleteButton.className).toContain("md:group-hover:opacity-100");
-    expect(deleteButton.className).toContain("md:group-focus-within:opacity-100");
-    expect(deleteButton.className).toContain("md:focus-visible:opacity-100");
-    expect(deleteButton.className).not.toMatch(/(?<!md:)\bopacity-0\b/);
-    expect(deleteButton.className).not.toMatch(/(?<!md:)group-hover:opacity-100/);
   });
 });

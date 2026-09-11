@@ -1,3 +1,6 @@
+import AppBar from "@mui/material/AppBar";
+import Toolbar from "@mui/material/Toolbar";
+import Typography from "@mui/material/Typography";
 import { ThemeToggle } from "./ThemeToggle";
 
 interface HeaderProps {
@@ -7,9 +10,11 @@ interface HeaderProps {
 
 export function Header({ theme, onToggleTheme }: HeaderProps) {
   return (
-    <header className="panel flex items-center justify-between border-b px-4 py-2 shadow-sm">
-      <span className="text-sm font-medium">Math Video Agent</span>
-      <ThemeToggle theme={theme} onToggle={onToggleTheme} />
-    </header>
+    <AppBar position="static" color="default" elevation={1}>
+      <Toolbar variant="dense" sx={{ justifyContent: "space-between" }}>
+        <Typography variant="subtitle2">Math Video Agent</Typography>
+        <ThemeToggle theme={theme} onToggle={onToggleTheme} />
+      </Toolbar>
+    </AppBar>
   );
 }

@@ -175,12 +175,12 @@ describe("AppShell", () => {
     await userEvent.type(screen.getByLabelText(/problem/i), "Solve x^2 - 4 = 0");
     await userEvent.click(screen.getByRole("button", { name: /send/i }));
 
-    // The empty<->active transition is now driven by Framer Motion
-    // (motion.div with initial/animate props in AppShell, no exit/
-    // AnimatePresence — see AppShell's comment on why), not a CSS class, so
-    // there's no class to assert on and jsdom can't observe actual animation
-    // playback either way. The outgoing element still unmounts instantly
-    // (no exit animation to wait for) while the incoming one animates in.
+    // The empty<->active transition is now driven by MUI's Fade component
+    // (in timeout={300}, no unmountOnExit), not a CSS class, so there's no
+    // class to assert on and jsdom can't observe actual animation playback
+    // either way. The outgoing element still unmounts instantly — the ternary
+    // in AppShell removes it from the tree the same way it always did, there
+    // is no exit animation to wait for — while the incoming one animates in.
     // What IS genuinely testable here: the active view's content actually
     // renders in place of the form — the real behavior the animation wraps.
     expect(within(screen.getByRole("main")).getByText("Solve x^2 - 4 = 0")).toBeInTheDocument();

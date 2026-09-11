@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "framer-motion";
+import Box from "@mui/material/Box";
+import CssBaseline from "@mui/material/CssBaseline";
+import { ThemeProvider } from "@mui/material/styles";
+import Fade from "@mui/material/Fade";
+import Card from "@mui/material/Card";
+import CardContent from "@mui/material/CardContent";
+import Typography from "@mui/material/Typography";
+import { getTheme } from "@/lib/theme";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 import { ProblemForm } from "./ProblemForm";
@@ -138,87 +145,60 @@ export function AppShell() {
   const detail = isLive ? job.detail : activeEntry?.detail;
 
   return (
-    <div className="flex h-screen flex-col">
-      <Header theme={theme} onToggleTheme={toggle} />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar
-          entries={history.entries}
-          activeJobId={activeJobId}
-          onNewProblem={handleNewProblem}
-          onSelect={handleSelect}
-          onDelete={handleDelete}
-          collapsed={sidebarCollapsed}
-          onCollapsedChange={setSidebarCollapsed}
-        />
-        <main className="flex flex-1 flex-col overflow-auto p-4">
-          {/* AnimatePresence (with an `exit` variant) was tried first, so the
-              form could animate OUT as the active view animates in. It had to
-              be dropped: AnimatePresence keeps the exiting element mounted
-              until its exit animation's onComplete fires, which depends on
-              real animation frames — jsdom/RTL's synchronous `userEvent`
-              flow never advances real time far enough for that to fire, so in
-              tests (and any consumer that doesn't wait ~300ms) BOTH the empty
-              form and the active view were mounted at once, breaking every
-              assertion that checks the form is gone right after submit. Without
-              an `exit` prop, Framer Motion removes the outgoing element
-              synchronously on unmount (no animation to wait for) — matching
-              the prior CSS behavior exactly for the exit — while `initial`/
-              `animate` still gives the incoming element a genuine animated
-              entrance instead of an instant snap. This is the documented
-              "simpler alternative" from the task spec, chosen because a
-              shared `layoutId` morph between a centered form and a
-              differently-shaped top-anchored echo box would not look good,
-              and because true exit+enter overlap isn't test-observable here
-              without changing how the whole suite drives time. */}
-          {!activeJobId ? (
-            <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-              className="flex flex-1 flex-col items-center justify-center"
-            >
-              {/* Centering within <main> centers relative to the space left of the
-                  sidebar (only reserved at md+, it's an overlay below that), not the
-                  full viewport — shift left by half the sidebar's current width so
-                  this box lands at the true window center instead. */}
-              <div
-                className={`w-full max-w-3xl transition-[margin] duration-300 ${
-                  sidebarCollapsed ? "md:ml-[-1.5rem]" : "md:ml-[-7.5rem]"
-                }`}
-              >
-                <h1 className="mb-4 text-center text-xl font-semibold">What should I solve?</h1>
-                {submitError && (
-                  <div className="mb-4">
-                    <ErrorMessage detail={submitError} />
-                  </div>
-                )}
-                <ProblemForm onSubmit={handleSubmit} disabled={submitting} />
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: "easeOut" }}
-              className="mx-auto flex w-full max-w-3xl flex-col gap-4"
-            >
-              <p className="text-muted text-xs font-medium uppercase">Your task</p>
-              <div className="bubble-system rounded-xl border border-[var(--border)] px-4 py-3 text-sm shadow-sm">
-                {activeEntry?.problem ?? job.jobId}
-              </div>
-              {reconcileError && <ErrorMessage detail={reconcileError} />}
-              {status && status !== "done" && status !== "error" && <JobProgress progress={progress} />}
-              {status === "error" && detail && <ErrorMessage detail={detail} />}
-              {status === "done" && video && (
-                <>
-                  <p className="text-muted text-xs font-medium uppercase">The solution</p>
-                  <VideoPlayer src={video.startsWith("http") ? video : jobVideoUrl(activeJobId)} />
-                </>
-              )}
-            </motion.div>
-          )}
-        </main>
-      </div>
-    </div>
+    <ThemeProvider theme={getTheme(theme)}>
+      <CssBaseline />
+      <Box sx={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+        <Header theme={theme} onToggleTheme={toggle} />
+        <Box sx={{ display: "flex", flex: 1, overflow: "hidden" }}>
+          <Sidebar
+            entries={history.entries}
+            activeJobId={activeJobId}
+            onNewProblem={handleNewProblem}
+            onSelect={handleSelect}
+            onDelete={handleDelete}
+            collapsed={sidebarCollapsed}
+            onCollapsedChange={setSidebarCollapsed}
+            mobile={isMobile}
+          />
+          <Box component="main" sx={{ flex: 1, overflow: "auto", p: 3, display: "flex", flexDirection: "column" }}>
+            {!activeJobId ? (
+              <Fade in timeout={300}>
+                <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <Box sx={{ width: "100%", maxWidth: 640 }}>
+                    <Typography variant="h6" align="center" sx={{ mb: 2 }}>
+                      What should I solve?
+                    </Typography>
+                    {submitError && (
+                      <Box sx={{ mb: 2 }}>
+                        <ErrorMessage detail={submitError} />
+                      </Box>
+                    )}
+                    <ProblemForm onSubmit={handleSubmit} disabled={submitting} />
+                  </Box>
+                </Box>
+              </Fade>
+            ) : (
+              <Fade in timeout={300}>
+                <Box sx={{ mx: "auto", width: "100%", maxWidth: 640, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <Typography variant="overline">Your task</Typography>
+                  <Card variant="outlined">
+                    <CardContent>{activeEntry?.problem ?? job.jobId}</CardContent>
+                  </Card>
+                  {reconcileError && <ErrorMessage detail={reconcileError} />}
+                  {status && status !== "done" && status !== "error" && <JobProgress progress={progress} />}
+                  {status === "error" && detail && <ErrorMessage detail={detail} />}
+                  {status === "done" && video && (
+                    <>
+                      <Typography variant="overline">The solution</Typography>
+                      <VideoPlayer src={video.startsWith("http") ? video : jobVideoUrl(activeJobId)} />
+                    </>
+                  )}
+                </Box>
+              </Fade>
+            )}
+          </Box>
+        </Box>
+      </Box>
+    </ThemeProvider>
   );
 }

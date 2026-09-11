@@ -1,6 +1,10 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import Box from "@mui/material/Box";
+import TextField from "@mui/material/TextField";
+import Button from "@mui/material/Button";
+import CircularProgress from "@mui/material/CircularProgress";
 
 interface ProblemFormProps {
   onSubmit: (problem: string) => void;
@@ -18,25 +22,20 @@ export function ProblemForm({ onSubmit, disabled }: ProblemFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
-      <label htmlFor="problem" className="sr-only">
-        Math problem
-      </label>
-      <input
+    <Box component="form" onSubmit={handleSubmit} sx={{ display: "flex", gap: 1 }}>
+      <TextField
         id="problem"
+        label="Math problem"
         value={problem}
         onChange={(e) => setProblem(e.target.value)}
         disabled={disabled}
         placeholder="Enter a math problem..."
-        className="flex-1 rounded-xl border border-[var(--border)] px-3 py-2 shadow-sm transition-colors disabled:opacity-50"
+        fullWidth
+        size="small"
       />
-      <button
-        type="submit"
-        disabled={disabled}
-        className="btn-primary rounded-xl px-4 py-2 shadow-sm transition-colors transition-[filter] hover:brightness-110 disabled:opacity-50"
-      >
-        Send
-      </button>
-    </form>
+      <Button type="submit" variant="contained" disabled={disabled} aria-label="Send" sx={{ minWidth: 96 }}>
+        {disabled ? <CircularProgress size={20} color="inherit" /> : "Send"}
+      </Button>
+    </Box>
   );
 }

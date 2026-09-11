@@ -29,11 +29,10 @@ describe("ProblemForm", () => {
     expect(screen.getByLabelText(/problem/i)).toBeDisabled();
   });
 
-  it("brightens the send button on hover, consistent with other primary buttons", () => {
-    render(<ProblemForm onSubmit={vi.fn()} />);
+  it("shows a loading indicator on the submit button while disabled", () => {
+    render(<ProblemForm onSubmit={vi.fn()} disabled />);
 
-    const sendButton = screen.getByRole("button", { name: /send/i });
-    expect(sendButton).toHaveClass("hover:brightness-110");
-    expect(sendButton.className).toContain("transition-[filter]");
+    expect(screen.getByRole("button")).toBeDisabled();
+    expect(screen.getByRole("progressbar")).toBeInTheDocument();
   });
 });

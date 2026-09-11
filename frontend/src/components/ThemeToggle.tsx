@@ -1,4 +1,6 @@
-import { Moon, Sun } from "lucide-react";
+import IconButton from "@mui/material/IconButton";
+import Brightness4Icon from "@mui/icons-material/Brightness4";
+import Brightness7Icon from "@mui/icons-material/Brightness7";
 
 interface ThemeToggleProps {
   theme: "dark" | "light";
@@ -8,8 +10,8 @@ interface ThemeToggleProps {
 export function ThemeToggle({ theme, onToggle }: ThemeToggleProps) {
   const label = theme === "dark" ? "Switch to light theme" : "Switch to dark theme";
   return (
-    <button aria-label={label} onClick={onToggle} className="text-muted rounded-full p-1.5 transition-colors hover:bg-[var(--bg)]">
-      {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
-    </button>
+    <IconButton aria-label={label} onClick={onToggle} size="small">
+      {theme === "dark" ? <Brightness7Icon fontSize="small" /> : <Brightness4Icon fontSize="small" />}
+    </IconButton>
   );
 }

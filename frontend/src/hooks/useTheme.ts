@@ -15,7 +15,6 @@ export function useTheme() {
   const [theme, setTheme] = useState<Theme>(readStored);
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
     window.localStorage.setItem(STORAGE_KEY, theme);
   }, [theme]);
 

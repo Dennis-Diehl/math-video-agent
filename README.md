@@ -94,7 +94,7 @@ flowchart LR
 | Narration | Kokoro TTS |
 | Video assembly | ffmpeg |
 | Backend API | FastAPI |
-| Frontend | Next.js, TypeScript, Tailwind CSS, Framer Motion |
+| Frontend | Next.js, TypeScript, MUI (Material UI) |
 | Sandboxing | Docker (per-job container) |
 | Testing | pytest, Vitest, React Testing Library |
 
