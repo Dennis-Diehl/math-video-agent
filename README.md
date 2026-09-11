@@ -129,6 +129,7 @@ Requires Docker and Docker Compose.
 ```bash
 git clone https://github.com/Dennis-Diehl/math-video-agent.git
 cd math-video-agent
+cp backend/.env.example backend/.env   # then fill in GEMINI_API_KEY
 just up
 ```
 
@@ -153,16 +154,6 @@ just check              # run backend + frontend lint/type checks
 just up                 # build and start the full stack via Docker Compose
 just down               # stop and remove the stack
 just logs               # tail logs from the running stack
-```
-
----
-
-## Environment Variables
-
-Copy `backend/.env.example` to `backend/.env` and fill in your key:
-
-```env
-GEMINI_API_KEY=your_key_here
 ```
 
 ---
