@@ -142,7 +142,12 @@ export function Sidebar({
       sx={{
         width,
         flexShrink: 0,
-        "& .MuiDrawer-paper": { width, boxSizing: "border-box", transition: (t) => t.transitions.create("width") },
+        "& .MuiDrawer-paper": {
+          position: "relative",
+          width,
+          boxSizing: "border-box",
+          transition: (t) => t.transitions.create("width"),
+        },
       }}
     >
       {content}
