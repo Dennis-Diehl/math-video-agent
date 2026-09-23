@@ -1,7 +1,3 @@
-"""assembler_node — join every scene's picture and narration into one video,
-via two ffmpeg passes (mux, then concat), no re-encoding.
-"""
-
 import subprocess
 from pathlib import Path
 

@@ -1,9 +1,3 @@
-"""Sandbox entrypoint: run one pipeline call, print progress as JSON lines.
-
-`api/jobs.py` starts this across a container boundary and can only see
-stdout, hence JSON lines instead of a return value.
-"""
-
 import json
 import os
 import shutil

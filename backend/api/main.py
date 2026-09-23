@@ -1,7 +1,3 @@
-"""FastAPI app: submit, poll, watch live, fetch the video. Thin — api/jobs.py
-owns all state and the background work.
-"""
-
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager

@@ -1,5 +1,3 @@
-"""classifier_node — read a math problem's topic, difficulty and wording."""
-
 from config.llm.base import BaseLLM, LLMUnavailableError
 from config.schemas import Classification
 from graph.pipeline_state import PipelineState

@@ -1,9 +1,3 @@
-"""Progress line shape, shared between the sandbox and the API.
-
-Dependency-free so run_job.py (heavy) and api/jobs.py (light) can both
-import it without pulling in the other's dependencies.
-"""
-
 from typing import Literal, TypedDict
 
 

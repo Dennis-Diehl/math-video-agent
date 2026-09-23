@@ -1,7 +1,3 @@
-"""tts_node — speak each scene's narration into an audio file, setting each
-scene's duration.
-"""
-
 from config.tts.base import BaseTTS
 from graph.media import audio_dir, run_id, scene_stem
 from graph.pipeline_state import PipelineState

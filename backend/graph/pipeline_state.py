@@ -1,5 +1,3 @@
-"""Shared state threaded through every pipeline node."""
-
 from typing import TypedDict
 
 from config.schemas import Scene, Step

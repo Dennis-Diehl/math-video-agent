@@ -1,5 +1,3 @@
-"""Abstract TTS interface. Depend on `BaseTTS`, not a concrete engine."""
-
 from abc import ABC, abstractmethod
 from pathlib import Path
 

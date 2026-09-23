@@ -1,5 +1,3 @@
-"""solver_node — solve a math problem into steps a video can show, via sympy."""
-
 import sympy as sp
 
 from config.llm.base import BaseLLM, LLMUnavailableError

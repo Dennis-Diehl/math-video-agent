@@ -1,5 +1,3 @@
-"""In-memory job store and background runner. Single process, no Redis."""
-
 import asyncio
 import json
 from pathlib import Path

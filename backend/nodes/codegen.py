@@ -1,8 +1,3 @@
-"""codegen_node — turn planned scenes into runnable Manim scene code. Scaffold
-and objects are generated deterministically; only the animation calls
-inside `construct()` come from the LLM.
-"""
-
 import json
 import math
 import re

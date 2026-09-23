@@ -1,7 +1,3 @@
-"""executor_node — render each scene's Manim code into a video file, retrying
-with LLM-corrected code on failure.
-"""
-
 import shutil
 import subprocess
 from pathlib import Path

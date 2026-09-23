@@ -1,7 +1,3 @@
-"""Application settings, loaded from env vars / `.env`. Import `settings`,
-never read `os.environ` directly.
-"""
-
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 

@@ -1,5 +1,3 @@
-"""Output paths for a pipeline run, keyed by a hash of the problem."""
-
 import hashlib
 import math
 from pathlib import Path

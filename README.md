@@ -83,6 +83,14 @@ flowchart LR
 
 ---
 
+## Known Limitations
+
+- **Videos aren't always what you'd expect.** Turning free-form sympy output and LLM-written LaTeX into a correctly laid-out Manim animation is genuinely hard:
+  - Term highlighting can point at the wrong part of a formula, objects can overlap, and pacing can feel off even when the math itself is correct.
+  - The intermediate solution steps aren't always the ones you'd actually want to see either — the LLM sometimes skips or groups a step differently than expected, even though the final result is right.
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |

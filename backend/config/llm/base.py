@@ -1,5 +1,3 @@
-"""Abstract LLM interface. Depend on `BaseLLM`, not a concrete provider."""
-
 from abc import ABC, abstractmethod
 from typing import TypeVar
 

@@ -1,5 +1,3 @@
-"""Kokoro implementation of `BaseTTS`. Runs locally, no API key needed."""
-
 from pathlib import Path
 
 import soundfile as sf

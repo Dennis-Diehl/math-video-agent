@@ -1,8 +1,3 @@
-"""Assembles the LangGraph pipeline and decides which model each node gets.
-Nodes are bound to their `llm`/`tts` via `functools.partial`, since LangGraph
-only passes state.
-"""
-
 from functools import partial
 from typing import cast
 
