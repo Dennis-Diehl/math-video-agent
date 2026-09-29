@@ -1,3 +1,4 @@
+import io
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -7,7 +8,7 @@ import pytest
 
 from graph import run_job
 from graph.pipeline import build_pipeline
-from graph.run_job import main, run
+from graph.run_job import main, read_job, run
 from nodes import assembler, executor
 from tests.test_pipeline import FakeLLM, FakeTTS
 
@@ -84,7 +85,7 @@ def test_main_reports_a_terminal_error_line_when_a_node_raises_uncaught(
 ) -> None:
     """A node raising mid-stream must still produce a terminal `node: None`
     line with a real error message, not a silent process crash."""
-    monkeypatch.setenv("PROBLEM", "hallo")
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"problem": "hallo", "gemini_api_key": "k"}\n'))
     monkeypatch.setattr(run_job, "build_pipeline", lambda **kwargs: _ExplodingPipeline())
     monkeypatch.setattr(run_job, "GeminiLLM", lambda *args, **kwargs: object())
     monkeypatch.setattr(run_job, "KokoroTTS", lambda *args, **kwargs: object())
@@ -99,6 +100,14 @@ def test_main_reports_a_terminal_error_line_when_a_node_raises_uncaught(
     assert result["video"] is None
     assert result["detail"] is not None
     assert "boom: the LLM call failed" in result["detail"]
-    # Not the generic infra-level fallback api/jobs.py falls back to when no
+    # Not the generic infra-level fallback jobs/worker.py falls back to when no
     # terminal line is ever seen.
     assert "stopped unexpectedly" not in result["detail"]
+
+
+def test_read_job_takes_the_problem_and_key_from_stdin(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "from-env")
+    job = json.dumps({"problem": "Solve x^2 - 4 = 0", "gemini_api_key": "from-stdin"})
+    monkeypatch.setattr("sys.stdin", io.StringIO(job + "\n"))
+
+    assert read_job() == ("Solve x^2 - 4 = 0", "from-stdin")

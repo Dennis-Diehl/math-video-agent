@@ -8,6 +8,7 @@ export interface JobSubmitted {
 export interface JobStatusSnapshot {
   status: JobStatus;
   queue_position?: number;
+  /** URL path of the video endpoint, relative to the API origin; present once done. */
   video?: string;
   detail?: string;
 }

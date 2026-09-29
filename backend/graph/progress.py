@@ -1,4 +1,7 @@
-from typing import Literal, TypedDict
+from typing import Literal
+
+# pydantic validates these (jobs/worker.py) and needs this TypedDict on Python < 3.12.
+from typing_extensions import TypedDict
 
 
 class ProgressLine(TypedDict):

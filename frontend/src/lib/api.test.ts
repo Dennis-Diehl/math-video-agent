@@ -17,12 +17,38 @@ describe("createJob", () => {
 
     expect(result).toEqual({ job_id: "abc", queue_position: 1 });
     expect(fetch).toHaveBeenCalledWith(
-      expect.stringMatching(/\/jobs$/),
+      expect.stringMatching(/\/api\/v1\/jobs$/),
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ problem: "Solve x^2 - 4 = 0" }),
       }),
     );
+  });
+});
+
+describe("createJob errors", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("surfaces the backend's message, e.g. when the queue is full", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({ detail: "Too many problems are waiting right now." }),
+      }),
+    );
+
+    await expect(createJob("x")).rejects.toThrow("Too many problems are waiting right now.");
+  });
+
+  it("falls back to the status code when the body has no readable message", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 502, json: () => Promise.reject(new Error()) }),
+    );
+
+    await expect(createJob("x")).rejects.toThrow("Failed to submit the problem (502).");
   });
 });
 
@@ -47,8 +73,8 @@ describe("getJobStatus", () => {
 
 describe("URL builders", () => {
   it("build the video and websocket URLs from a job id", () => {
-    expect(jobVideoUrl("abc")).toMatch(/\/jobs\/abc\/video$/);
+    expect(jobVideoUrl("abc")).toMatch(/\/api\/v1\/jobs\/abc\/video$/);
     expect(jobWsUrl("abc")).toMatch(/^ws/);
-    expect(jobWsUrl("abc")).toMatch(/\/jobs\/abc\/ws$/);
+    expect(jobWsUrl("abc")).toMatch(/\/api\/v1\/jobs\/abc\/ws$/);
   });
 });

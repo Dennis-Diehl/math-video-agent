@@ -6,7 +6,7 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      # Host and container path must match — see DooD note in api/jobs.py.
+      # Host and container path must match — see DooD note in jobs/sandbox.py.
       - JOB_OUTPUT_DIR=${PWD}/backend/media/jobs
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock

@@ -1,91 +1,57 @@
-import uuid
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
-from api import jobs
+from api.routes import jobs as job_routes
 from config.config import settings
+from jobs.sandbox import DockerSandbox, Sandbox
+from jobs.store import JobStore
+from jobs.worker import Worker, start_workers, stop_workers
+
+API_PREFIX = "/api/v1"
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    workers = await jobs.start_workers()
-    yield
-    for worker in workers:
-        worker.cancel()
+def create_app(sandbox: Sandbox | None = None) -> FastAPI:
+    """`sandbox` defaults to Docker; tests pass a fake."""
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        # The API never calls Gemini itself, but every job would fail without a key.
+        if not settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set. Add it to backend/.env.")
+        store = JobStore(
+            output_root=Path(settings.job_output_dir),
+            max_queued=settings.max_queued_jobs,
+            ttl_seconds=settings.job_ttl_seconds,
+        )
+        app.state.store = store
+        workers = start_workers(Worker(store, sandbox or DockerSandbox()))
+        yield
+        await stop_workers(workers)
+
+    app = FastAPI(title="Math Video Agent", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[settings.frontend_origin],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
+
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        """Unversioned: the Docker healthcheck depends on this path."""
+        return {"status": "ok"}
+
+    api = APIRouter(prefix=API_PREFIX)
+    api.include_router(job_routes.router)
+    app.include_router(api)
+    return app
 
 
-app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[settings.frontend_origin],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-class JobRequest(BaseModel):
-    problem: str
-
-
-class JobSubmitted(BaseModel):
-    job_id: str
-    queue_position: int
-
-
-@app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
-
-
-@app.post("/jobs")
-def create_job(request: JobRequest) -> JobSubmitted:
-    job_id = uuid.uuid4().hex
-    position = jobs.submit(job_id, request.problem)
-    return JobSubmitted(job_id=job_id, queue_position=position)
-
-
-@app.get("/jobs/{job_id}")
-def job_status(job_id: str) -> dict[str, object]:
-    status = jobs.get_status(job_id)
-    if status is None:
-        raise HTTPException(status_code=404, detail="No job with that id.")
-    return status
-
-
-@app.get("/jobs/{job_id}/video")
-def job_video(job_id: str) -> FileResponse:
-    status = jobs.get_status(job_id)
-    video = status.get("video") if status else None
-    if not video or not Path(str(video)).exists():
-        raise HTTPException(status_code=404, detail="This job has no video yet.")
-    return FileResponse(str(video), media_type="video/mp4")
-
-
-@app.websocket("/jobs/{job_id}/ws")
-async def job_progress(websocket: WebSocket, job_id: str) -> None:
-    await websocket.accept()
-    if jobs.get_status(job_id) is None:
-        await websocket.close(code=4004, reason="No job with that id.")
-        return
-
-    # Subscribe before replaying the log — see api/jobs.py's subscribe() docstring.
-    queue = jobs.subscribe(job_id)
-    try:
-        for line in jobs.get_log(job_id):
-            await websocket.send_json(line)
-        while True:
-            line = await queue.get()
-            await websocket.send_json(line)
-            if line["node"] is None:
-                break
-    except WebSocketDisconnect:
-        pass
-    finally:
-        jobs.unsubscribe(job_id, queue)
+app = create_app()

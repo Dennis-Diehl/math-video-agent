@@ -190,7 +190,7 @@ export function AppShell() {
                   {status === "done" && video && (
                     <>
                       <Typography variant="overline">The solution</Typography>
-                      <VideoPlayer src={video.startsWith("http") ? video : jobVideoUrl(activeJobId)} />
+                      <VideoPlayer src={jobVideoUrl(activeJobId)} />
                     </>
                   )}
                 </Box>

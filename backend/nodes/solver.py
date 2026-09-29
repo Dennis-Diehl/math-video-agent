@@ -1,8 +1,7 @@
-import sympy as sp
-
 from config.llm.base import BaseLLM, LLMUnavailableError
 from config.schemas import Extraction, Solution
 from graph.pipeline_state import PipelineState
+from graph.untrusted import UntrustedEvaluationError, evaluate_snippet, first_parse_error
 
 MAX_EXPLANATION_ATTEMPTS = 3
 
@@ -100,18 +99,17 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
         state["error"] = f"Could not extract the math from this problem: {e}" + REPHRASE_HINT
         return state
 
-    namespace: dict[str, object] = {"sp": sp}
+    # LLM-generated code: isolated, see graph/untrusted.py.
     error: str | None = None
     try:
-        exec(extraction.sympy_code, namespace)  # noqa: S102 — namespace limited to {"sp": sp}
-        result = namespace.get("result")
-        solvable = result is not None
-        if not solvable:
-            error = "sympy produced no result for this problem." + REPHRASE_HINT
-    except Exception as e:  # noqa: BLE001 — exec() of LLM-generated code can raise any exception type
-        result = None
-        solvable = False
-        error = f"sympy could not evaluate this problem: {e}" + REPHRASE_HINT
+        result, exec_error = evaluate_snippet(extraction.sympy_code)
+    except UntrustedEvaluationError as e:
+        result, exec_error = None, str(e)
+    if exec_error is not None:
+        error = f"sympy could not evaluate this problem: {exec_error}" + REPHRASE_HINT
+    elif result is None:
+        error = "sympy produced no result for this problem." + REPHRASE_HINT
+    solvable = error is None
 
     if solvable:
         prompt = (
@@ -143,18 +141,20 @@ def solver_node(state: PipelineState, llm: BaseLLM) -> PipelineState:
                 )
                 return state
             try:
-                for step in candidate.steps:
-                    sp.sympify(step.expression, evaluate=False)  # same parse codegen_node uses
+                # Same parse as codegen_node.
+                parse_error = first_parse_error([step.expression for step in candidate.steps])
+            except UntrustedEvaluationError as e:
+                parse_error = str(e)
+            if parse_error is None:
                 solution = candidate
                 break
-            except Exception as e:  # noqa: BLE001 — sp.sympify() can raise any exception type on invalid syntax
-                unparsed = str(e)
-                prompt = (
-                    f"Given the problem '{state['problem_statement']}' and the final result '{result}', "
-                    "write a step-by-step solution leading to this result.\n"
-                    f"Your previous attempt included an expression sympy could not parse: {e}\n"
-                    "Fix the syntax and write the full step-by-step solution again."
-                )
+            unparsed = parse_error
+            prompt = (
+                f"Given the problem '{state['problem_statement']}' and the final result '{result}', "
+                "write a step-by-step solution leading to this result.\n"
+                f"Your previous attempt included an expression sympy could not parse: {parse_error}\n"
+                "Fix the syntax and write the full step-by-step solution again."
+            )
         else:
             solvable = False
             error = f"The solution steps could not be parsed: {unparsed}" + REPHRASE_HINT

@@ -3,12 +3,11 @@ import math
 import re
 import textwrap
 
-import sympy as sp
-
 from config.llm.base import BaseLLM
 from config.schemas import AnimationCode, Scene
 from graph.media import whole_frames
 from graph.pipeline_state import PipelineState
+from graph.untrusted import Plot, describe
 
 MAX_ANIMATION_ATTEMPTS = 3
 ANIMATION_SECONDS = 1.0  # Manim's default animation duration
@@ -94,13 +93,6 @@ def _scene_expressions(state: PipelineState, scene: Scene) -> list[str]:
     return [state["solution"][index - 1].expression for index in scene.step_indices]
 
 
-def _to_latex(expression: str) -> str:
-    """Render a sympy expression as LaTeX, exactly as written: unevaluated so
-    manipulations stay visible, `order="none"` so terms keep their position.
-    """
-    return sp.latex(sp.sympify(expression, evaluate=False), order="none")
-
-
 def _quote(value: str) -> str:
     """JSON-quote a string for embedding in generated Python source, so
     backslash-heavy LaTeX survives round-tripping through a source file."""
@@ -164,18 +156,6 @@ def _split_latex(latex: str) -> list[str]:
     return parts or [latex]
 
 
-def _plottable(expressions: list[str]) -> tuple[sp.Expr, sp.Symbol] | None:
-    """Find the first expression plottable as y = f(x), with its free symbol."""
-    for expression in expressions:
-        parsed = sp.sympify(expression)
-        if not isinstance(parsed, sp.Expr) or parsed.is_number:
-            continue
-        symbols = parsed.free_symbols
-        if len(symbols) == 1:
-            return parsed, symbols.pop()
-    return None
-
-
 def _setup_formulas(latex_formulas: list[str]) -> tuple[str, dict[str, list[str]]]:
     """Create one `MathTex` per formula, centred and built from its terms."""
     lines = []
@@ -189,14 +169,14 @@ def _setup_formulas(latex_formulas: list[str]) -> tuple[str, dict[str, list[str]
     return _indent("\n".join(lines)), objects
 
 
-def _setup_graph(expression: sp.Expr, variable: sp.Symbol) -> tuple[str, dict[str, list[str]]]:
+def _setup_graph(plot: Plot) -> tuple[str, dict[str, list[str]]]:
     """Create axes on the left, the formula on the right, and the curve."""
     lines = [
         "axes = Axes(x_range=[-5, 5, 1], y_range=[-5, 5, 1], x_length=6, y_length=5)",
         "axes.to_edge(LEFT)",
-        f'axis_labels = axes.get_axis_labels(x_label="{variable.name}", y_label="y")',
-        f"formula_1 = MathTex({_quote(sp.latex(expression))}).scale(0.8).to_edge(RIGHT)",
-        f"graph = axes.plot(lambda {variable.name}: {sp.pycode(expression)}, color=BLUE)",
+        f'axis_labels = axes.get_axis_labels(x_label="{plot.variable}", y_label="y")',
+        f"formula_1 = MathTex({_quote(plot.latex)}).scale(0.8).to_edge(RIGHT)",
+        f"graph = axes.plot(lambda {plot.variable}: {plot.python}, color=BLUE)",
     ]
     return _indent("\n".join(lines)), {"axes": [], "axis_labels": [], "formula_1": [], "graph": []}
 
@@ -222,17 +202,17 @@ def _build_setup(scene: Scene, expressions: list[str]) -> tuple[str, dict[str, l
     "geometry"/"diagram" fall back to formulas, since `Scene` carries no
     points/edges to draw a construction or tree from.
     """
-    latex_formulas = [_to_latex(expression) for expression in expressions]
+    # sympify is eval(): isolated, see graph/untrusted.py.
+    description = describe(expressions, plot=scene.visual_type == "graph") if expressions else None
+    latex_formulas = description.latex if description else []
 
     if scene.visual_type == "text" or not latex_formulas:
         setup, objects = _setup_title(scene)
         return setup, objects, ""
 
-    if scene.visual_type == "graph":
-        plottable = _plottable(expressions)
-        if plottable is not None:
-            setup, objects = _setup_graph(*plottable)
-            return setup, objects, "import math\n"
+    if scene.visual_type == "graph" and description is not None and description.plot is not None:
+        setup, objects = _setup_graph(description.plot)
+        return setup, objects, "import math\n"
 
     if scene.visual_type == "table":
         setup, objects = _setup_table(latex_formulas)

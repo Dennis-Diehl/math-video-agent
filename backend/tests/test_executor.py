@@ -1,4 +1,7 @@
+import os
+import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -185,3 +188,23 @@ def test_executor_keeps_rendered_scenes_when_one_fails(monkeypatch: pytest.Monke
     assert len(state["scene_videos"]) == 3
     assert all(state["scene_videos"])
     assert "Scene 2" in (state["error"] or "")
+
+
+def test_render_runs_generated_code_without_the_gemini_key(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    monkeypatch.setenv("GEMINI_API_KEY", "secret")
+    monkeypatch.setattr(executor, "MEDIA_DIR", tmp_path)
+    monkeypatch.setattr(executor, "scene_dir", lambda run: tmp_path / "scenes" / run)
+    seen: dict[str, dict[str, str]] = {}
+
+    def fake_run(arguments: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen["env"] = kwargs["env"]
+        return subprocess.CompletedProcess(arguments, returncode=1, stdout="", stderr="failed")
+
+    monkeypatch.setattr(executor.subprocess, "run", fake_run)
+
+    executor._render("code", "run", 1)
+
+    assert "GEMINI_API_KEY" not in seen["env"]
+    assert seen["env"]["PATH"] == os.environ["PATH"]

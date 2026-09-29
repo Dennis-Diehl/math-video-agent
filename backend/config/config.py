@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     # API / job orchestration
     job_output_dir: str = "media/jobs"
     frontend_origin: str = "http://localhost:3000"
+    max_problem_length: int = 2000
+    max_queued_jobs: int = 20  # submissions beyond this get 503 until the queue drains
+    job_ttl_seconds: int = 86400  # finished jobs leave memory after this; their video stays on disk
 
 
 settings = Settings()

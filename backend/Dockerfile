@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements-api.txt
 COPY config/__init__.py config/config.py config/
 COPY graph/__init__.py graph/progress.py graph/
 COPY api/ api/
+COPY jobs/ jobs/
 
 ENV PYTHONPATH=/app
 

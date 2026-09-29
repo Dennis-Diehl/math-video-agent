@@ -6,6 +6,7 @@ from config.llm.base import BaseLLM
 from config.schemas import SceneCode
 from graph.media import MEDIA_DIR, RENDER_QUALITY, run_id, scene_dir, scene_stem
 from graph.pipeline_state import PipelineState
+from graph.untrusted import environment
 from nodes.codegen import fallback_code
 
 MAX_RENDER_ATTEMPTS = 3
@@ -51,7 +52,7 @@ def _render(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
 
     shutil.rmtree(MEDIA_DIR / "videos" / stem, ignore_errors=True)
 
-    # LLM-generated code runs in a separate process, not a sandbox.
+    # Generated code gets no Gemini key; host isolation comes from the job's container.
     try:
         result = subprocess.run(
             [
@@ -68,6 +69,7 @@ def _render(code: str, run: str, scene_number: int) -> tuple[Path | None, str]:
             text=True,
             timeout=RENDER_TIMEOUT_SECONDS,
             check=False,
+            env=environment(),
         )
     except subprocess.TimeoutExpired:
         return None, f"Rendering timed out after {RENDER_TIMEOUT_SECONDS} seconds."

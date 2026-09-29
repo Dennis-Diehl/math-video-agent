@@ -1,6 +1,7 @@
+import ctypes
 import json
-import os
 import shutil
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -42,24 +43,44 @@ def run(pipeline: CompiledStateGraph, problem: str) -> Iterator[ProgressLine]:
     }
 
 
+# From <linux/prctl.h>.
+PR_SET_DUMPABLE = 4
+
+
+def protect_memory() -> None:
+    """Linux: same-user children then need CAP_SYS_PTRACE (dropped) to read our memory."""
+    if sys.platform != "linux":
+        return
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE, 0) failed")
+
+
+def read_job() -> tuple[str, str]:
+    """Via stdin, not env: children running generated code would inherit the env."""
+    job = json.loads(sys.stdin.readline())
+    return job["problem"], job["gemini_api_key"]
+
+
 def main() -> None:
-    """Read the job from the environment, run it, print progress, save the video.
+    """Read the job from stdin, run it, print progress, save the video.
 
     `run()`'s generator is consumed lazily here, so an exception any node raises
     (e.g. an LLM call failing outright, not just sympy/render failures the nodes
     already catch themselves) surfaces when this loop pulls the next line, not
     inside `run()`. Catching it here, around the loop, means the process still
     exits 0 with a terminal `ProgressLine` instead of dying with a bare
-    traceback and a non-zero exit code — which `api/jobs.py` cannot tell apart
+    traceback and a non-zero exit code — which `jobs/worker.py` cannot tell apart
     from a genuine infra failure (container wouldn't start, OOM-killed) and
     reports as the generic "stopped unexpectedly" message. This is a sandbox
     entrypoint safety net, not node-level error handling: it says nothing about
     *why* a node failed, only that one did.
     """
-    problem = os.environ["PROBLEM"]
+    protect_memory()  # before the key is read into memory
+    problem, api_key = read_job()
     pipeline = build_pipeline(
-        llm=GeminiLLM(settings.gemini_model_flash, settings.gemini_api_key),
-        cheap_llm=GeminiLLM(settings.gemini_model_flash_lite, settings.gemini_api_key),
+        llm=GeminiLLM(settings.gemini_model_flash, api_key),
+        cheap_llm=GeminiLLM(settings.gemini_model_flash_lite, api_key),
         tts=KokoroTTS(settings.kokoro_voice, settings.kokoro_lang_code),
     )
 

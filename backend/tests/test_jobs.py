@@ -1,269 +1,298 @@
 import asyncio
-import json
+from pathlib import Path
 
 import pytest
 
-from api import jobs
+from jobs.store import JobStore, QueueFullError
+from jobs.worker import TIMEOUT_DETAIL, Worker, parse_line, start_workers, stop_workers
+from tests.job_fakes import FakeProcess, FakeSandbox, HangingProcess, make_line
+
+PROBLEM = "Solve x^2 - 4 = 0"
 
 
-class FakeStream:
-    """Stands in for `asyncio.subprocess.Process.stdout`: a fixed async iterator of lines."""
-
-    def __init__(self, lines: list[str]):
-        self._lines = iter(lines)
-
-    def __aiter__(self) -> "FakeStream":
-        return self
-
-    async def __anext__(self) -> bytes:
-        try:
-            return next(self._lines).encode()
-        except StopIteration:
-            raise StopAsyncIteration from None
-
-
-class HangingStream:
-    """Stands in for a container stdout that never produces a line — used to
-    trigger `asyncio.timeout` deterministically instead of actually waiting
-    out `CONTAINER_TIMEOUT_SECONDS`."""
-
-    def __aiter__(self) -> "HangingStream":
-        return self
-
-    async def __anext__(self) -> bytes:
-        await asyncio.sleep(10)
-        raise AssertionError("should have been canceled by the timeout first")
-
-
-class FakeProcess:
-    """Stands in for `asyncio.subprocess.Process`: fixed stdout, a fixed exit code."""
-
-    def __init__(self, lines: list[str], returncode: int = 0):
-        self.stdout = FakeStream(lines)
-        self.returncode = returncode
-
-    async def wait(self) -> int:
-        return self.returncode
-
-    def kill(self) -> None:
-        self.returncode = -9
-
-
-class HangingProcess:
-    """Stands in for a container that never prints a terminal line and never
-    exits on its own — only `kill()` ends it, mirroring what `_run` does on
-    `TimeoutError`."""
-
+class FakeClock:
     def __init__(self) -> None:
-        self.stdout = HangingStream()
-        self.returncode: int | None = None
+        self.now = 0.0
 
-    async def wait(self) -> int:
-        assert self.returncode is not None, "wait() called before kill()"
-        return self.returncode
-
-    def kill(self) -> None:
-        self.returncode = -9
+    def __call__(self) -> float:
+        return self.now
 
 
-def make_line(
-    node: str | None, status: str = "done", detail: str | None = None, video: str | None = None
-) -> str:
-    return json.dumps({"node": node, "status": status, "detail": detail, "video": video}) + "\n"
+@pytest.fixture
+def clock() -> FakeClock:
+    return FakeClock()
 
 
-@pytest.fixture(autouse=True)
-def clean_job_state():
-    # Module-level state — tests must reset it so jobs can't leak between tests.
-    jobs._jobs.clear()
-    jobs._queue_order.clear()
-    yield
-    jobs._jobs.clear()
-    jobs._queue_order.clear()
+@pytest.fixture
+def store(tmp_path: Path, clock: FakeClock) -> JobStore:
+    return JobStore(output_root=tmp_path, max_queued=3, ttl_seconds=100, clock=clock)
 
 
-def test_submit_registers_a_queued_job():
-    position = jobs.submit("abc", "Solve x^2 - 4 = 0")
+# --- JobStore ---
 
+
+def test_submit_registers_a_queued_job(store: JobStore):
+    position = store.submit("abc", PROBLEM)
+
+    snapshot = store.snapshot("abc")
     assert position == 1
-    assert jobs.get_status("abc") == {"status": "queued", "queue_position": 1}
+    assert snapshot is not None
+    assert snapshot.status == "queued"
+    assert snapshot.queue_position == 1
 
 
-def test_submit_increments_position_for_a_second_job():
-    jobs.submit("first", "Solve x^2 - 4 = 0")
-    position = jobs.submit("second", "Differentiate x**3")
+def test_submit_increments_position_for_a_second_job(store: JobStore):
+    store.submit("first", PROBLEM)
 
-    assert position == 2
-    assert jobs.get_status("second") == {"status": "queued", "queue_position": 2}
+    assert store.submit("second", "Differentiate x**3") == 2
 
 
-def test_queue_position_recomputes_as_earlier_jobs_leave_the_queue():
-    jobs.submit("first", "Solve x^2 - 4 = 0")
-    jobs.submit("second", "Differentiate x**3")
+async def test_queue_position_recomputes_as_earlier_jobs_leave_the_queue(store: JobStore):
+    store.submit("first", PROBLEM)
+    store.submit("second", "Differentiate x**3")
 
-    jobs._queue_order.remove("first")  # what a consumer task does on dequeue
+    assert await store.next_job() == ("first", PROBLEM)
 
-    assert jobs.get_status("second") == {"status": "queued", "queue_position": 1}
-
-
-def test_get_status_is_none_for_an_unknown_job():
-    assert jobs.get_status("nonexistent") is None
+    snapshot = store.snapshot("second")
+    assert snapshot is not None
+    assert snapshot.queue_position == 1
 
 
-def test_get_status_falls_back_to_disk_for_a_job_the_store_forgot(tmp_path, monkeypatch):
-    monkeypatch.setattr(jobs.settings, "job_output_dir", str(tmp_path))
-    video = tmp_path / "restarted" / "final.mp4"
+def test_submit_rejects_jobs_once_the_queue_is_full(store: JobStore):
+    for job_id in ("a", "b", "c"):
+        store.submit(job_id, PROBLEM)
+
+    with pytest.raises(QueueFullError):
+        store.submit("d", PROBLEM)
+    assert store.get("d") is None
+
+
+def test_snapshot_is_none_for_an_unknown_job(store: JobStore):
+    assert store.snapshot("nonexistent") is None
+
+
+def test_snapshot_falls_back_to_disk_for_a_job_the_store_forgot(store: JobStore):
+    video = store.video_path("restarted")
     video.parent.mkdir()
     video.write_bytes(b"fake video")
 
-    assert jobs.get_status("restarted") == {"status": "done", "video": str(video)}
+    snapshot = store.snapshot("restarted")
+
+    assert snapshot is not None
+    assert snapshot.status == "done"
+    assert snapshot.video == video
 
 
-async def test_run_records_every_line_and_the_final_status(monkeypatch: pytest.MonkeyPatch):
-    jobs.submit("abc", "Solve x^2 - 4 = 0")
-    process = FakeProcess(
-        [
-            make_line("classifier"),
-            make_line("solver"),
-            # Meaningless outside the container — api/jobs.py must not store this string.
-            make_line(None, video="media/videos/x/final.mp4"),
-        ]
-    )
+def test_finish_stores_the_host_path_not_the_container_path(store: JobStore):
+    store.submit("abc", PROBLEM)
 
-    async def fake_start_container(job_id: str, problem: str) -> FakeProcess:
-        return process
+    store.finish("abc", {"node": None, "status": "done", "detail": None, "video": "/tmp/x.mp4"})
 
-    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
-
-    await jobs._run("abc", "Solve x^2 - 4 = 0")
-
-    # The path api/jobs.py itself bind-mounted, not the container-internal one.
-    expected_video = str(jobs._output_dir("abc") / "final.mp4")
-    assert jobs.get_status("abc") == {"status": "done", "video": expected_video}
-    assert [line["node"] for line in jobs.get_log("abc")] == ["classifier", "solver", None]
+    job = store.get("abc")
+    assert job is not None
+    assert job.video == store.video_path("abc")
+    assert store.log("abc")[-1]["video"] == str(store.video_path("abc"))
 
 
-async def test_run_ignores_non_json_lines_from_third_party_warnings(
-    monkeypatch: pytest.MonkeyPatch,
+def test_finished_jobs_are_evicted_after_their_ttl(store: JobStore, clock: FakeClock):
+    store.submit("old", PROBLEM)
+    store.fail("old", "boom")
+
+    clock.now = 101
+    store.submit("new", PROBLEM)
+
+    assert store.get("old") is None
+    assert store.get("new") is not None
+
+
+def test_eviction_spares_unfinished_jobs_and_jobs_with_a_live_subscriber(
+    store: JobStore, clock: FakeClock
 ):
-    # torch/huggingface_hub print warnings to stdout ahead of the JSON lines.
-    jobs.submit("abc", "Solve x^2 - 4 = 0")
+    store.submit("waiting", PROBLEM)
+    store.submit("watched", PROBLEM)
+    store.fail("watched", "boom")
+    store.subscribe("watched")
+
+    clock.now = 1000
+    store.submit("new", PROBLEM)
+
+    assert store.get("waiting") is not None
+    assert store.get("watched") is not None
+
+
+def test_unsubscribe_tolerates_an_evicted_job(store: JobStore):
+    store.submit("abc", PROBLEM)
+    queue = store.subscribe("abc")
+    store._jobs.clear()
+
+    store.unsubscribe("abc", queue)  # must not raise
+
+
+def test_subscribe_receives_lines_recorded_after_it_registers(store: JobStore):
+    store.submit("abc", PROBLEM)
+    queue = store.subscribe("abc")
+
+    store.record("abc", {"node": "classifier", "status": "done", "detail": None, "video": None})
+
+    assert queue.get_nowait()["node"] == "classifier"
+
+
+# --- parse_line ---
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        b"Warning: You are sending unauthenticated requests to the HF Hub.\n",
+        b"\n",
+        b"123\n",  # valid JSON, not a progress line: used to kill the worker
+        b'{"node": "x"}\n',
+        b"\xff\xfe\n",  # invalid UTF-8
+    ],
+)
+def test_parse_line_ignores_anything_that_is_not_a_progress_line(raw: bytes):
+    assert parse_line(raw) is None
+
+
+def test_parse_line_reads_a_progress_line():
+    assert parse_line(make_line("solver")) == {
+        "node": "solver",
+        "status": "done",
+        "detail": None,
+        "video": None,
+    }
+
+
+# --- Worker ---
+
+
+async def run(store: JobStore, sandbox: FakeSandbox, timeout: float = 5) -> None:
+    store.submit("abc", PROBLEM)
+    await store.next_job()
+    await Worker(store, sandbox, timeout=timeout).run("abc", PROBLEM)
+
+
+async def test_run_records_every_line_and_the_final_status(store: JobStore):
+    process = FakeProcess(
+        [make_line("classifier"), make_line("solver"), make_line(None, video="/tmp/x.mp4")]
+    )
+
+    await run(store, FakeSandbox(process))
+
+    snapshot = store.snapshot("abc")
+    assert snapshot is not None
+    assert snapshot.status == "done"
+    assert snapshot.video == store.video_path("abc")
+    assert [line["node"] for line in store.log("abc")] == ["classifier", "solver", None]
+
+
+async def test_run_skips_noise_and_overlong_lines(store: JobStore):
     process = FakeProcess(
         [
-            "Warning: You are sending unauthenticated requests to the HF Hub.\n",
+            b"Warning: noise\n",
+            b"123\n",
+            ValueError("Separator is not found, and chunk exceed the limit"),
             make_line("classifier"),
-            make_line(None, video="media/videos/x/final.mp4"),
+            make_line(None),
         ]
     )
 
-    async def fake_start_container(job_id: str, problem: str) -> FakeProcess:
-        return process
+    await run(store, FakeSandbox(process))
 
-    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
+    assert [line["node"] for line in store.log("abc")] == ["classifier", None]
 
-    await jobs._run("abc", "Solve x^2 - 4 = 0")
 
-    assert [line["node"] for line in jobs.get_log("abc")] == ["classifier", None]
-    status = jobs.get_status("abc")
-    assert status is not None
-    assert status["status"] == "done"
+async def test_run_ignores_lines_after_the_result(store: JobStore):
+    process = FakeProcess([make_line(None), make_line("late"), make_line(None, status="error")])
+
+    await run(store, FakeSandbox(process))
+
+    assert [line["node"] for line in store.log("abc")] == [None]
+    job = store.get("abc")
+    assert job is not None
+    assert job.status == "done"
 
 
 async def test_run_synthesizes_an_error_when_the_container_produces_no_result(
-    monkeypatch: pytest.MonkeyPatch,
+    store: JobStore,
 ):
     # e.g. OOM-killed: some lines, never a node=None one.
-    jobs.submit("abc", "Solve x^2 - 4 = 0")
-    process = FakeProcess([make_line("classifier")], returncode=137)
+    await run(store, FakeSandbox(FakeProcess([make_line("classifier")], returncode=137)))
 
-    async def fake_start_container(job_id: str, problem: str) -> FakeProcess:
-        return process
-
-    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
-
-    await jobs._run("abc", "Solve x^2 - 4 = 0")
-
-    status = jobs.get_status("abc")
-    assert status is not None
-    assert status["status"] == "error"
-    assert jobs.get_log("abc")[-1]["node"] is None
+    snapshot = store.snapshot("abc")
+    assert snapshot is not None
+    assert snapshot.status == "error"
+    assert "exit code 137" in (snapshot.detail or "")
+    assert store.log("abc")[-1]["node"] is None
 
 
-async def test_run_reports_a_specific_message_when_the_container_times_out(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    # Never prints a line within the (monkeypatched-short) timeout window.
-    monkeypatch.setattr(jobs, "CONTAINER_TIMEOUT_SECONDS", 0.05)
-    jobs.submit("abc", "Solve x^2 - 4 = 0")
+async def test_run_stops_the_container_and_reports_a_timeout(store: JobStore):
     process = HangingProcess()
+    sandbox = FakeSandbox(process)
 
-    async def fake_start_container(job_id: str, problem: str) -> HangingProcess:
-        return process
+    await run(store, sandbox, timeout=0.05)
 
-    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
-
-    await jobs._run("abc", "Solve x^2 - 4 = 0")
-
-    status = jobs.get_status("abc")
-    assert status is not None
-    assert status["status"] == "error"
-    detail = status["detail"]
-    assert isinstance(detail, str)
-    assert "longer than" in detail
-    assert "stopped unexpectedly" not in detail
-    # The timeout branch must report once, not fall through to the generic
-    # no-result fallback too.
-    assert len(jobs.get_log("abc")) == 1
+    snapshot = store.snapshot("abc")
+    assert snapshot is not None
+    assert snapshot.status == "error"
+    assert snapshot.detail == TIMEOUT_DETAIL
+    # Killing the `docker run` client alone would leave the container running.
+    assert sandbox.stopped == ["abc"]
+    assert process.killed
+    assert len(store.log("abc")) == 1
 
 
-async def test_get_status_includes_detail_after_an_error(monkeypatch: pytest.MonkeyPatch):
-    jobs.submit("abc", "Solve x^2 - 4 = 0")
-    process = FakeProcess([make_line(None, status="error", detail="sympy could not solve this.")])
+async def test_run_reports_an_error_when_the_container_cannot_start(store: JobStore):
+    await run(store, FakeSandbox(error=OSError("docker: command not found")))
 
-    async def fake_start_container(job_id: str, problem: str) -> FakeProcess:
-        return process
-
-    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
-
-    await jobs._run("abc", "Solve x^2 - 4 = 0")
-
-    assert jobs.get_status("abc") == {"status": "error", "detail": "sympy could not solve this."}
+    snapshot = store.snapshot("abc")
+    assert snapshot is not None
+    assert snapshot.status == "error"
+    assert "docker: command not found" in (snapshot.detail or "")
 
 
-async def test_run_reports_an_error_when_the_container_cannot_start(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_consume_survives_a_job_that_crashes_the_worker(
+    store: JobStore, monkeypatch: pytest.MonkeyPatch
 ):
-    # e.g. `docker` missing or daemon unreachable — nothing ran, not even one line.
-    jobs.submit("abc", "Solve x^2 - 4 = 0")
+    worker = Worker(store, FakeSandbox(FakeProcess([make_line(None)])))
+    original_run = worker.run
+    calls = 0
 
-    async def fake_start_container(job_id: str, problem: str) -> FakeProcess:
-        raise OSError("docker: command not found")
+    async def crash_once(job_id: str, problem: str) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("unforeseen")
+        await original_run(job_id, problem)
 
-    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
+    monkeypatch.setattr(worker, "run", crash_once)
+    store.submit("first", PROBLEM)
+    store.submit("second", PROBLEM)
 
-    await jobs._run("abc", "Solve x^2 - 4 = 0")
+    task = asyncio.create_task(worker.consume())
+    for _ in range(100):
+        job = store.get("second")
+        if job is not None and job.status == "done":
+            break
+        await asyncio.sleep(0.01)
+    await stop_workers([task])
 
-    status = jobs.get_status("abc")
-    assert status is not None
-    assert status["status"] == "error"
-    assert jobs.get_log("abc")[-1]["node"] is None
+    first = store.get("first")
+    second = store.get("second")
+    assert first is not None and first.status == "error"
+    assert second is not None and second.status == "done"
 
 
-async def test_subscribe_receives_lines_written_after_it_registers(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    jobs.submit("abc", "Solve x^2 - 4 = 0")
-    process = FakeProcess([make_line("classifier"), make_line(None, video="x.mp4")])
+async def test_stop_workers_stops_the_running_container(store: JobStore):
+    sandbox = FakeSandbox(HangingProcess())
+    store.submit("abc", PROBLEM)
+    tasks = start_workers(Worker(store, sandbox))
+    for _ in range(100):
+        if sandbox.started:
+            break
+        await asyncio.sleep(0.01)
 
-    async def fake_start_container(job_id: str, problem: str) -> FakeProcess:
-        return process
+    await stop_workers(tasks)
 
-    monkeypatch.setattr(jobs, "_start_container", fake_start_container)
-    queue = jobs.subscribe("abc")
-
-    await jobs._run("abc", "Solve x^2 - 4 = 0")
-
-    first = await queue.get()
-    second = await queue.get()
-    assert first["node"] == "classifier"
-    assert second["node"] is None
+    assert sandbox.stopped == ["abc"]
+    assert all(task.done() for task in tasks)

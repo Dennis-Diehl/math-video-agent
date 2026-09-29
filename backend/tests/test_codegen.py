@@ -284,7 +284,7 @@ def test_split_latex_is_lossless():
 
 
 def test_to_latex_keeps_the_order_the_solver_wrote():
-    from nodes.codegen import _to_latex
+    from graph.untrusted import to_latex as _to_latex
 
     # sympy's default latex() sorts terms into its own canonical order, which
     # would swap terms between consecutive steps for no visible reason.
@@ -405,3 +405,30 @@ def test_fallback_code_lasts_as_long_as_its_narration():
 
     pause = float(re.search(r"self\.wait\(([\d.]+)\)", code).group(1))  # type: ignore[union-attr]
     assert pause + ANIMATION_SECONDS >= 6.0
+
+
+def test_codegen_handles_a_derivative_in_a_formula_scene():
+    # Regression: the plot search used to run for every scene and crashed on
+    # `Derivative`, which sympy cannot print as Python code.
+    llm = FakeLLM(["self.play(Write(formula_1))"])
+    state = make_state([make_scene(visual_type="equation", step_indices=[1])])
+    state["solution"] = [
+        Step(explanation="Differentiate.", expression="Derivative(x**3 + 2*x**5, x)")
+    ]
+
+    code = codegen_node(state, llm)["manim_codes"][0]
+
+    assert "formula_1 = MathTex(" in code
+
+
+def test_codegen_graph_scene_falls_back_to_formulas_for_an_unplottable_derivative():
+    llm = FakeLLM(["self.play(Write(formula_1))"])
+    state = make_state([make_scene(visual_type="graph", step_indices=[1])])
+    state["solution"] = [
+        Step(explanation="Differentiate.", expression="Derivative(x**3 + 2*x**5, x)")
+    ]
+
+    code = codegen_node(state, llm)["manim_codes"][0]
+
+    assert "axes = Axes(" not in code
+    assert "formula_1 = MathTex(" in code

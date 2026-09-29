@@ -78,7 +78,7 @@ flowchart LR
 
 - **Per-node error handling**: every node owns its own failure path instead of a shared corrector node. `executor_node` retries with LLM-corrected code, then falls back to a title-only scene rather than dropping it.
 - **Narration drives scene timing, not the reverse**: TTS runs before code generation, so animations stretch to match narration length instead of speech getting cut off.
-- **Sandboxed, restartable jobs**: each job runs in its own throwaway Docker container, with output on disk so status survives an API restart.
+- **Sandboxed, restartable jobs**: each job runs in its own throwaway Docker container, with output on disk so status survives an API restart. The container drops all Linux capabilities and receives the problem and API key over stdin, so the LLM-generated Manim code it runs never sees the key in its environment. LLM-generated sympy code and expressions are evaluated in a separate child process as well, never next to the key.
 - **Constrained structured output**: classification fields use `Literal` types with Gemini's schema-constrained generation, so the API is structurally unable to return an inconsistent value.
 
 ---
@@ -114,9 +114,10 @@ flowchart LR
 math-video-agent/
 ├── backend/
 │   ├── .env.example  # Template for backend/.env
-│   ├── api/          # FastAPI app, job queue, sandbox orchestration
+│   ├── api/          # FastAPI app: routes, request/response schemas
 │   ├── config/       # Settings, LLM/TTS abstractions, structured-output schemas
 │   ├── graph/        # LangGraph pipeline assembly, state, media paths
+│   ├── jobs/         # Job store, queue worker, Docker sandbox
 │   ├── nodes/        # One file per pipeline node
 │   └── tests/
 ├── frontend/
@@ -141,7 +142,7 @@ cp backend/.env.example backend/.env   # then fill in GEMINI_API_KEY
 just up
 ```
 
-The frontend is then available at `http://localhost:3000`, the API at `http://localhost:8000`.
+The frontend is then available at `http://localhost:3000`, the API at `http://localhost:8000/api/v1` (interactive docs at `http://localhost:8000/docs`). The API refuses to start without `GEMINI_API_KEY`.
 
 Common `just` recipes:
 
